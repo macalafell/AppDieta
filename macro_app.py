@@ -349,3 +349,4 @@ else:
                 st.download_button("Descargar receta (CSV)", data=csv, file_name=f"{r['nombre'].replace(' ','_')}.csv", mime="text/csv")
 
 st.markdown(\"\"\"\n---\n**Nota**: Los datos y recetas se guardan solo durante la sesión en el navegador. Si quieres persistencia entre sesiones (guardar en disco), pídemelo y lo añadimos (por ejemplo, guardando en un archivo CSV/Excel \"recetas_guardadas.xlsx\").\n\"\"\")\n
+            “Fix SyntaxError by simplifying docstring”

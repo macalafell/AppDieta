@@ -81,7 +81,7 @@ def load_foods(xls_file) -> pd.DataFrame:
         return pd.DataFrame()
 
 def nnls_iterative(A, b, max_iter=5):
-    \"\"\"Resuelve A x ~= b con x >= 0 de forma iterativa simple sin SciPy.\"\"\"
+    """Solve A·x ≈ b with x≥0 by iterative least squares."""
     used = np.arange(A.shape[1])
     x = np.maximum(0, np.linalg.lstsq(A, b, rcond=None)[0])
     for _ in range(max_iter):

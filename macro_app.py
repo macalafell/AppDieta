@@ -247,11 +247,24 @@ meals_summary = pd.DataFrame([
     meal_targets("Merienda", defaults["Merienda"]),
     meal_targets("Cena",     defaults["Cena"]),
 ])
-st.dataframe(meals_summary, use_container_width=True)
 
+# ➕ Fila TOTAL
+totals_row = {
+    "Comida": "TOTAL",
+    "kcal": round(meals_summary["kcal"].sum(), 0),
+    "Carbohidratos (g)": round(meals_summary["Carbohidratos (g)"].sum(), 1),
+    "Proteína (g)": round(meals_summary["Proteína (g)"].sum(), 1),
+    "Grasa (g)": round(meals_summary["Grasa (g)"].sum(), 1),
+}
+meals_summary_total = pd.concat([meals_summary, pd.DataFrame([totals_row])], ignore_index=True)
+
+# Mostrar con totales
+st.dataframe(meals_summary_total, use_container_width=True)
+
+# Exportar con totales
 buf_meals = BytesIO()
 with pd.ExcelWriter(buf_meals, engine="openpyxl") as writer:
-    meals_summary.to_excel(writer, index=False, sheet_name="Macros por comida")
+    meals_summary_total.to_excel(writer, index=False, sheet_name="Macros por comida")
 buf_meals.seek(0)
 st.download_button(
     "Descargar resumen por comida (Excel)",
@@ -259,6 +272,7 @@ st.download_button(
     file_name="resumen_macros_por_comida.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
+
 
 # -----------------------------
 # Objetivos por comida seleccionada

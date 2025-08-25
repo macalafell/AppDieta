@@ -508,17 +508,56 @@ else:
         colC.metric("Proteínas (g)", f"{prot_tot:.0f}", delta=f"{prot_tot - p_target:+.0f}")
         colD.metric("Grasas (g)", f"{fat_tot:.0f}", delta=f"{fat_tot - f_target:+.0f}")
 
-        # Autoajuste global: ajustar TODOS los alimentos a la vez con NNLS
-        if st.button("Ajustar gramos automáticamente para cuadrar macros"):
-            A = editor_df[["carb_g", "prot_g", "fat_g"]].to_numpy().T  # 3 x N
-            b = np.array([c_target, p_target, f_target], dtype=float)
-            if A.size == 0 or not np.isfinite(A).any():
-                st.warning("No hay datos válidos para ajustar.")
-            else:
-                x = nnls_iterative(A, b, max_iter=50)
-                editor_df.loc[:, "Gramos (g)"] = x
-                st.session_state[editor_key] = editor_df
-                st.success("Gramos ajustados para todos los alimentos según los objetivos de macros.")
+        # Autoajuste de gramos
+        st.markdown("**Ajuste de gramos**")
+        btn_col1, btn_col2 = st.columns([1, 2])
+
+        # 1) Ajustar TODOS los ingredientes (cuadrar macros totales)
+        with btn_col1:
+            if st.button("Ajustar TODOS (cuadrar macros)"):
+                A = editor_df[["carb_g", "prot_g", "fat_g"]].to_numpy().T  # 3 x N
+                b = np.array([c_target, p_target, f_target], dtype=float)
+                if A.size == 0 or not np.isfinite(A).any():
+                    st.warning("No hay datos válidos para ajustar.")
+                else:
+                    x = nnls_iterative(A, b, max_iter=50)
+                    editor_df.loc[:, "Gramos (g)"] = x
+                    st.session_state[editor_key] = editor_df
+                    st.success("Gramos ajustados para todos los alimentos según los objetivos de macros.")
+
+        # 2) Ajustar SOLO un ingrediente seleccionado por el usuario
+        with btn_col2:
+            ing_choice = st.selectbox(
+                "Ingrediente a ajustar (solo este)", editor_df["Producto"].tolist(), key=f"single_sel_{meal}"
+            )
+            if st.button("Ajustar SOLO este ingrediente"):
+                # déficits actuales respecto al objetivo
+                deficits = np.array([
+                    c_target - carb_tot,
+                    p_target - prot_tot,
+                    f_target - fat_tot,
+                ], dtype=float)
+                v = (
+                    editor_df.loc[editor_df["Producto"] == ing_choice, ["carb_g", "prot_g", "fat_g"]]
+                    .to_numpy()
+                    .ravel()
+                )
+                denom = float(np.dot(v, v))
+                if denom <= 0 or not np.isfinite(denom):
+                    st.warning("No se puede ajustar con este ingrediente (densidades no válidas).")
+                else:
+                    # mejor ajuste LS en una dimensión (puede ser + o -). No permitimos gramos negativos.
+                    g_delta = float(np.dot(v, deficits)) / denom
+                    current_g = float(
+                        editor_df.loc[editor_df["Producto"] == ing_choice, "Gramos (g)"].iloc[0]
+                    )
+                    new_val = max(0.0, current_g + g_delta)
+                    editor_df.loc[editor_df["Producto"] == ing_choice, "Gramos (g)"] = new_val
+                    st.session_state[editor_key] = editor_df
+                    msg = "aumentados" if g_delta >= 0 else "reducidos"
+                    st.success(
+                        f"Gramos {msg} en '{ing_choice}' en {abs(g_delta):.0f} g (nuevo total: {new_val:.0f} g)."
+                    )
 
         # Detalle actual de la receta
         df_curr = editor_df[["Producto", "Gramos (g)"]].copy()

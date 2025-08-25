@@ -7,6 +7,13 @@ import unicodedata
 from io import BytesIO
 from typing import Dict, List, Optional
 
+def _safe_rerun():
+    """Compatibilidad Streamlit: usa st.rerun() si existe; si no, _safe_rerun()."""
+    if hasattr(st, "rerun"):
+        st.rerun()
+    elif hasattr(st, "experimental_rerun"):
+        _safe_rerun()
+
 # =============================
 # Configuración de la página
 # =============================
@@ -493,7 +500,7 @@ else:
                         st.success(
                             f"Ajustado {add_g:.0f} g en '{editor_df.loc[idx, 'Producto']}' para cubrir déficit de {macro}."
                         )
-                        st.experimental_rerun()
+                        _safe_rerun()
 
         # Detalle actual de la receta
         df_curr = editor_df[["Producto", "Gramos (g)"]].copy()

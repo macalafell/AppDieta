@@ -132,6 +132,7 @@ st.sidebar.caption("Día BAJO")
 p_bajo = st.sidebar.number_input("Proteína (g/kg) - BAJO", value=2.0, step=0.1)
 g_bajo = st.sidebar.number_input("Grasa (g/kg) - BAJO", value=1.5, step=0.1)
 
+
 # Cargar datos
 if uploaded is not None:
     foods = load_foods(uploaded)

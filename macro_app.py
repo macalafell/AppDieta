@@ -309,9 +309,29 @@ else:
         s = search.strip().lower()
         df_view = df_view[df_view["Producto"].str.lower().str.contains(s) | df_view["Marca"].astype(str).str.lower().str.contains(s)]
 
-    st.dataframe(df_view[["Producto","Marca","kcal/g","carb/g","prot/g","fat/g"]].rename(columns={
-        "kcal_g":"kcal/g","carb_g":"carb/g","prot_g":"prot/g","fat_g":"fat/g"
-    }), use_container_width=True, height=300)
+ # --- Tabla de alimentos (robusta) ---
+cols_map = {
+    "kcal_g": "kcal/g",
+    "carb_g": "carb/g",
+    "prot_g": "prot/g",
+    "fat_g":  "fat/g",
+}
+
+base_cols = ["Producto", "Marca"]
+macro_cols = list(cols_map.keys())
+
+# Comprobar columnas presentes
+missing = [c for c in base_cols + macro_cols if c not in df_view.columns]
+if missing:
+    st.error(f"Faltan columnas en el DataFrame de alimentos: {missing}. "
+             "Asegúrate de que el Excel fue leído correctamente.")
+else:
+    df_show = (
+        df_view[base_cols + macro_cols]
+        .rename(columns=cols_map)
+    )
+    st.dataframe(df_show, use_container_width=True, height=300)
+
 
     choices = st.multiselect("Elige alimentos para la receta", df_view["Producto"].tolist())
     selected = df_view[df_view["Producto"].isin(choices)].reset_index(drop=True)

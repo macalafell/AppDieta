@@ -309,6 +309,25 @@ a_f = {"Alto": g_alto, "Medio": g_medio, "Bajo": g_bajo}[tipo_dia] * weight
 kcal_from_p_f = a_p * 4 + a_f * 9
 a_c = max(0.0, (tdee - kcal_from_p_f) / 4.0)
 
+# Mostrar tabla de alimentos con nombres amigables
+view_cols = ["Producto", "Marca", "kcal_g", "carb_g", "prot_g", "fat_g"]
+
+# Defensa por si el Excel no trae todas las columnas esperadas
+missing = [c for c in view_cols if c not in df_view.columns]
+if missing:
+    st.error(f"Faltan columnas esperadas en los datos: {missing}. Revisa el Excel o la normalización.")
+else:
+    st.dataframe(
+        df_view[view_cols].rename(columns={
+            "kcal_g": "kcal/g",
+            "carb_g": "carb/g",
+            "prot_g": "prot/g",
+            "fat_g": "fat/g",
+        }),
+        use_container_width=True,
+        height=300,
+    )
+
 left, right = st.columns([1, 1])
 with left:
     st.metric("BMR (kcal/día)", f"{bmr:.0f}")

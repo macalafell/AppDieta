@@ -585,7 +585,7 @@ else:
                     )
 
         # Detalle actual de la receta
-        df_curr = editor_df[["Producto", "Bloqueado", "Gramos (g)"]].copy()
+        df_curr = editor_df[["Producto", "Gramos (g)"]].copy()
         df_curr["Carbohidratos (g)"] = (editor_df["carb_g"] * editor_df["Gramos (g)"]).round(1)
         df_curr["Proteína (g)"] = (editor_df["prot_g"] * editor_df["Gramos (g)"]).round(1)
         df_curr["Grasa (g)"] = (editor_df["fat_g"] * editor_df["Gramos (g)"]).round(1)

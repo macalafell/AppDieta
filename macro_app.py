@@ -136,47 +136,39 @@ g_bajo = st.sidebar.number_input("Grasa (g/kg) - BAJO", value=1.5, step=0.1)
 st.sidebar.markdown("---")
 st.sidebar.subheader("Carbohidratos (g/día) calculados")
 
-def carbs_for_day(mult, p_gkg, f_gkg):
+def carbs_for_day(mult, p_gkg, f_gkg, adj_pct_value):
     tdee_x = mifflin_st_jeor_bmr(sex, weight, height, age) * mult
-    tdee_x = tdee_x * (1 + adj_pct/100.0)
+    tdee_x = tdee_x * (1 + adj_pct_value/100.0)
     p_day_x = p_gkg * weight
     f_day_x = f_gkg * weight
     c_day_x = max(0.0, (tdee_x - (p_day_x*4 + f_day_x*9)) / 4.0)
     return round(float(c_day_x), 1)
 
-carbs_alto  = carbs_for_day(mult_alto,  p_alto,  g_alto)
-carbs_medio = carbs_for_day(mult_medio, p_medio, g_medio)
-carbs_bajo  = carbs_for_day(mult_bajo,  p_bajo,  g_bajo)
+# OJO: aquí usamos adj_pct, que ya debe existir si el slider está por encima;
+# si no, pon 0 provisionalmente o mueve este bloque bajo el slider.
+carbs_alto  = carbs_for_day(mult_alto,  p_alto,  g_alto,  adj_pct)
+carbs_medio = carbs_for_day(mult_medio, p_medio, g_medio, adj_pct)
+carbs_bajo  = carbs_for_day(mult_bajo,  p_bajo,  g_bajo,  adj_pct)
 
-# Mismo estilo que los selectores de proteína/grasas (caption + number_input)
 st.sidebar.caption("Día ALTO")
 st.sidebar.number_input(
     "Carbohidratos (g/día) - ALTO",
-    value=carbs_alto,
-    step=0.1,
-    format="%.1f",
-    disabled=True,
-    key="c_alto_readonly",
+    value=carbs_alto, step=0.1, format="%.1f",
+    disabled=True, key="c_alto_readonly",
 )
 
 st.sidebar.caption("Día MEDIO")
 st.sidebar.number_input(
     "Carbohidratos (g/día) - MEDIO",
-    value=carbs_medio,
-    step=0.1,
-    format="%.1f",
-    disabled=True,
-    key="c_medio_readonly",
+    value=carbs_medio, step=0.1, format="%.1f",
+    disabled=True, key="c_medio_readonly",
 )
 
 st.sidebar.caption("Día BAJO")
 st.sidebar.number_input(
     "Carbohidratos (g/día) - BAJO",
-    value=carbs_bajo,
-    step=0.1,
-    format="%.1f",
-    disabled=True,
-    key="c_bajo_readonly",
+    value=carbs_bajo, step=0.1, format="%.1f",
+    disabled=True, key="c_bajo_readonly",
 )
 
 # Cargar datos

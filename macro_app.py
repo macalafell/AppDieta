@@ -440,6 +440,7 @@ else:
             | df_view["Marca"].astype(str).str.lower().str.contains(s)
         ]
 
+st.write("Columnas de df_view:", list(df_view.columns))
    # Mostrar tabla de alimentos con nombres amigables
 view_cols = ["Producto", "Marca", "kcal_g", "carb_g", "prot_g", "fat_g"]
 

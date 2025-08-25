@@ -192,6 +192,44 @@ def load_foods(uploaded) -> pd.DataFrame:
 
 
 # =============================
+# Solver NNLS (sin SciPy) para ajustar gramos de TODOS los alimentos
+# =============================
+
+def nnls_iterative(A: np.ndarray, b: np.ndarray, max_iter: int = 50) -> np.ndarray:
+    """Resuelve min ||A x - b|| con x>=0 (active set simple) y escala de columnas.
+    - A: matriz (m x n) con densidades por gramo (p.ej., filas=carb/prot/fat; columnas=alimentos)
+    - b: vector objetivo (m,)
+    Devuelve x (n,) en gramos por alimento.
+    """
+    A = np.asarray(A, dtype=float)
+    b = np.asarray(b, dtype=float)
+    if A.ndim != 2 or b.ndim != 1 or A.shape[0] != b.shape[0]:
+        return np.zeros(A.shape[1] if A.ndim == 2 else 0)
+
+    # Escalado de columnas para mejorar acondicionamiento
+    col_scale = np.linalg.norm(A, axis=0)
+    col_scale[col_scale == 0] = 1.0
+    A_s = A / col_scale
+
+    # Solución LS y poda de negativos iterativamente
+    x = np.maximum(0.0, np.linalg.lstsq(A_s, b, rcond=None)[0])
+    for _ in range(max_iter):
+        neg = x < 0
+        if not neg.any():
+            break
+        keep = ~neg
+        if keep.sum() == 0:
+            return np.zeros_like(x)
+        A_sub = A_s[:, keep]
+        x_sub = np.maximum(0.0, np.linalg.lstsq(A_sub, b, rcond=None)[0])
+        x = np.zeros_like(x)
+        x[keep] = x_sub
+
+    # Des-escalado
+    x = np.maximum(0.0, x) / col_scale
+    return x
+
+# =============================
 # Sidebar: Perfil y parámetros
 # =============================
 
@@ -470,37 +508,17 @@ else:
         colC.metric("Proteínas (g)", f"{prot_tot:.0f}", delta=f"{prot_tot - p_target:+.0f}")
         colD.metric("Grasas (g)", f"{fat_tot:.0f}", delta=f"{fat_tot - f_target:+.0f}")
 
-        # Autoajuste simple: elegir alimento con mayor densidad del macronutriente faltante
+        # Autoajuste global: ajustar TODOS los alimentos a la vez con NNLS
         if st.button("Ajustar gramos automáticamente para cuadrar macros"):
-            deficits = {
-                "carb": c_target - carb_tot,
-                "prot": p_target - prot_tot,
-                "fat": f_target - fat_tot,
-            }
-            # Macro con mayor déficit (solo si es positivo)
-            macro = max(deficits, key=lambda k: deficits[k])
-            deficit_val = deficits[macro]
-            if deficit_val <= 0:
-                st.info("No hay déficit positivo en macros; no es necesario ajustar.")
+            A = editor_df[["carb_g", "prot_g", "fat_g"]].to_numpy().T  # 3 x N
+            b = np.array([c_target, p_target, f_target], dtype=float)
+            if A.size == 0 or not np.isfinite(A).any():
+                st.warning("No hay datos válidos para ajustar.")
             else:
-                col_map = {"carb": "carb_g", "prot": "prot_g", "fat": "fat_g"}
-                dens_col = col_map[macro]
-                dens = editor_df[dens_col].to_numpy()
-                if len(dens) == 0 or not np.isfinite(dens).any() or np.nanmax(dens) <= 0:
-                    st.warning("No se pudo ajustar: densidades no válidas o todos 0.")
-                else:
-                    idx = int(np.nanargmax(dens))
-                    best_density = float(dens[idx])
-                    add_g = deficit_val / best_density if best_density > 0 else 0.0
-                    if not np.isfinite(add_g) or add_g <= 0:
-                        st.warning("No se pudo calcular un incremento de gramos válido.")
-                    else:
-                        editor_df.loc[idx, "Gramos (g)"] = float(editor_df.loc[idx, "Gramos (g)"]) + add_g
-                        st.session_state[editor_key] = editor_df
-                        st.success(
-                            f"Ajustado {add_g:.0f} g en '{editor_df.loc[idx, 'Producto']}' para cubrir déficit de {macro}."
-                        )
-                        _safe_rerun()
+                x = nnls_iterative(A, b, max_iter=50)
+                editor_df.loc[:, "Gramos (g)"] = x
+                st.session_state[editor_key] = editor_df
+                st.success("Gramos ajustados para todos los alimentos según los objetivos de macros.")
 
         # Detalle actual de la receta
         df_curr = editor_df[["Producto", "Gramos (g)"]].copy()

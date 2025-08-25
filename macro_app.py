@@ -138,6 +138,28 @@ adj_pct = st.sidebar.slider("Ajuste de calorías totales (%)", min_value=-25, ma
 st.sidebar.markdown("---")
 uploaded = st.sidebar.file_uploader("Sube tu Excel de alimentos (opcional)", type=["xlsx"])
 
+# >>> NUEVO: resumen de CARBOHIDRATOS (g/día) por tipo de día, calculados automáticamente
+st.sidebar.markdown("---")
+st.sidebar.subheader("Carbohidratos estimados por tipo de día")
+
+def carbs_for_day(mult, p_gkg, f_gkg):
+    tdee_x = mifflin_st_jeor_bmr(sex, weight, height, age) * mult
+    tdee_x = tdee_x * (1 + adj_pct/100.0)
+    p_day_x = p_gkg * weight
+    f_day_x = f_gkg * weight
+    c_day_x = max(0.0, (tdee_x - (p_day_x*4 + f_day_x*9)) / 4.0)
+    return round(c_day_x, 1)
+
+carbs_row = {
+    "Alto": carbs_for_day(mult_alto, p_alto, g_alto),
+    "Medio": carbs_for_day(mult_medio, p_medio, g_medio),
+    "Bajo": carbs_for_day(mult_bajo, p_bajo, g_bajo),
+}
+st.sidebar.table(
+    pd.DataFrame([carbs_row]).T.rename(columns={0: "Carbohidratos (g/día)"})
+)
+
+
 # Cargar datos
 if uploaded is not None:
     foods = load_foods(uploaded)

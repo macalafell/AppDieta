@@ -22,6 +22,9 @@ st.set_page_config(page_title="APP DIETA · Planificador de platos", layout="wid
 st.markdown("""
 <style>
   h1, h2, h3 { color: #0ea5e9 !important; }
+  /* Evitar solapes en encabezado del expander */
+  div.streamlit-expanderHeader { white-space: normal !important; overflow: hidden; }
+  div.streamlit-expanderHeader p { margin: 0 !important; }
 </style>
 """, unsafe_allow_html=True)
 st.title("APP Creador Recetas")
@@ -335,7 +338,7 @@ meal_defaults = {
     "Cena": {"prot": 0.43, "fat": 0.44, "carb": 0.30},
 }
 
-with st.expander("Editar porcentajes de reparto por comida (proporción del día)"):
+with st.expander("Editar reparto (proporción del día)"):
     for key in meal_defaults:
         st.write(f"**{key}**")
         meal_defaults[key]["prot"] = st.number_input(

@@ -330,7 +330,7 @@ with right:
 st.markdown("### Reparto por comida")
 meal_defaults = {
     "Desayuno": {"prot": 0.10, "fat": 0.10, "carb": 0.27},
-    "Comida": {"prot": 0.39, "fat": 0.40, "carb": 0.26},
+    "Almuerzo": { "prot": 0.39, "fat": 0.40, "carb": 0.26},
     "Merienda": {"prot": 0.08, "fat": 0.06, "carb": 0.17},
     "Cena": {"prot": 0.43, "fat": 0.44, "carb": 0.30},
 }
@@ -378,7 +378,7 @@ def meal_targets(meal_name: str, perc: Dict[str, float]) -> Dict[str, float]:
 
 meals_summary = pd.DataFrame([
     meal_targets("Desayuno", meal_defaults["Desayuno"]),
-    meal_targets("Comida", meal_defaults["Comida"]),
+    meal_targets("Almuerzo", meal_defaults["Almuerzo"]),
     meal_targets("Merienda", meal_defaults["Merienda"]),
     meal_targets("Cena", meal_defaults["Cena"]),
 ])
@@ -410,7 +410,7 @@ st.download_button(
 # Objetivos por comida seleccionada
 # =============================
 
-meal = st.selectbox("Comida", ["Desayuno", "Comida", "Merienda", "Cena"])
+meal = st.selectbox("Comida", ["Desayuno", "Almuerzo", "Merienda", "Cena"])
 perc = meal_defaults[meal]
 p_target = p_day * perc["prot"]
 f_target = f_day * perc["fat"]

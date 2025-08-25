@@ -425,9 +425,14 @@ st.info(f"Objetivo para {meal} → {kcal_target:.0f} kcal | Prot: {p_target:.0f}
 st.markdown("### Creador de receta")
 if foods.empty:
     st.warning("Primero sube o coloca en la carpeta un Excel de alimentos (alimentos_800_especificos.xlsx).")
-else:    fcol1, fcol2 = st.columns(2)
+else:
+    # --- Filtros (sin categoría) ---
+    fcol1, fcol2 = st.columns(2)
     with fcol1:
-        sel_sub = st.selectbox("Filtrar por subcategoría", ["(Todas)"] + sorted(foods["Subcategoría"].astype(str).unique().tolist()))
+        sel_sub = st.selectbox(
+            "Filtrar por subcategoría",
+            ["(Todas)"] + sorted(foods["Subcategoría"].astype(str).unique().tolist()),
+        )
     with fcol2:
         search = st.text_input("Buscar por nombre/marca contiene…", "")
 
@@ -436,26 +441,39 @@ else:    fcol1, fcol2 = st.columns(2)
         df_view = df_view[df_view["Subcategoría"] == sel_sub]
     if search.strip():
         s = search.strip().lower()
-        df_view = df_view[df_view["Producto"].str.lower().str.contains(s) | df_view["Marca"].astype(str).str.lower().str.contains(s)]
+        df_view = df_view[
+            df_view["Producto"].str.lower().str.contains(s)
+            | df_view["Marca"].astype(str).str.lower().str.contains(s)
+        ]
 
+    # Mostrar tabla con nombres amigables (fix KeyError)
     view_cols = ["Producto", "Marca", "kcal_g", "carb_g", "prot_g", "fat_g"]
     missing = [c for c in view_cols if c not in df_view.columns]
     if missing:
         st.error(f"Faltan columnas esperadas en los datos normalizados: {missing}")
     else:
         st.dataframe(
-            df_view[view_cols].rename(columns={"kcal_g": "kcal/g", "carb_g": "carb/g", "prot_g": "prot/g", "fat_g": "fat/g"}),
+            df_view[view_cols].rename(
+                columns={"kcal_g": "kcal/g", "carb_g": "carb/g", "prot_g": "prot/g", "fat_g": "fat/g"}
+            ),
             use_container_width=True,
             height=300,
         )
 
     # Multiselección (máximo 10)
-    choices = st.multiselect("Elige hasta 10 alimentos para la receta", df_view["Producto"].tolist())
+    choices = st.multiselect(
+        "Elige hasta 10 alimentos para la receta",
+        df_view["Producto"].tolist(),
+    )
     if len(choices) > 10:
         st.warning("Has seleccionado más de 10 elementos; se usarán los 10 primeros.")
         choices = choices[:10]
 
-    selected = df_view[df_view["Producto"].isin(choices)].drop_duplicates("Producto").reset_index(drop=True)
+    selected = (
+        df_view[df_view["Producto"].isin(choices)]
+        .drop_duplicates("Producto")
+        .reset_index(drop=True)
+    )
 
     if not selected.empty:
         # Editor de gramos con persistencia en session_state
@@ -467,7 +485,6 @@ else:    fcol1, fcol2 = st.columns(2)
         if prev_products != current_products:
             # inicializar o re-sincronizar (con columna de bloqueo)
             base_df = selected[["Producto", "carb_g", "prot_g", "fat_g", "kcal_g"]].copy()
-            # traer locks antiguos si existen
             old_locks = st.session_state.get(lock_key, {})
             locks = {p: bool(old_locks.get(p, False)) for p in base_df["Producto"].tolist()}
             base_df.insert(1, "Bloqueado", pd.Series([locks[p] for p in base_df["Producto"]]))
@@ -482,6 +499,7 @@ else:    fcol1, fcol2 = st.columns(2)
             locks = st.session_state.get(lock_key, {p: False for p in editor_df["Producto"].tolist()})
             editor_df.insert(1, "Bloqueado", editor_df["Producto"].map(lambda p: bool(locks.get(p, False))))
             st.session_state[editor_key] = editor_df
+
         st.write("Introduce gramos (puedes dejar a 0 y usar el ajuste automático):")
         editor_df = st.data_editor(
             editor_df,
@@ -526,7 +544,7 @@ else:    fcol1, fcol2 = st.columns(2)
         colC.metric("Proteínas (g)", f"{prot_tot:.0f}", delta=f"{prot_tot - p_target:+.0f}")
         colD.metric("Grasas (g)", f"{fat_tot:.0f}", delta=f"{fat_tot - f_target:+.0f}")
 
-        # Autoajuste de gramos
+        # Ajuste de gramos
         st.markdown("**Ajuste de gramos**")
         btn_col1, btn_col2 = st.columns([1, 2])
 
@@ -561,6 +579,7 @@ else:    fcol1, fcol2 = st.columns(2)
                     st.success("Gramos ajustados para los ingredientes desbloqueados.")
                     _safe_rerun()
 
+        # 2) Ajustar SOLO un ingrediente seleccionado por el usuario
         with btn_col2:
             ing_choice = st.selectbox(
                 "Ingrediente a ajustar (solo este)", editor_df["Producto"].tolist(), key=f"single_sel_{meal}"
@@ -596,7 +615,7 @@ else:    fcol1, fcol2 = st.columns(2)
                     )
 
         # Detalle actual de la receta
-        df_curr = editor_df[["Producto", "Gramos (g)"]].copy()
+        df_curr = editor_df[["Producto", "Bloqueado", "Gramos (g)"]].copy()
         df_curr["Carbohidratos (g)"] = (editor_df["carb_g"] * editor_df["Gramos (g)"]).round(1)
         df_curr["Proteína (g)"] = (editor_df["prot_g"] * editor_df["Gramos (g)"]).round(1)
         df_curr["Grasa (g)"] = (editor_df["fat_g"] * editor_df["Gramos (g)"]).round(1)
@@ -610,8 +629,8 @@ else:    fcol1, fcol2 = st.columns(2)
         recipe_name = st.text_input("Nombre de la receta")
         if "recipes" not in st.session_state:
             st.session_state["recipes"] = []
+
         if st.button("Guardar receta"):
-            # Recalcular totales por si hubo cambios
             grams = editor_df["Gramos (g)"]
             totals = editor_df[["kcal_g", "carb_g", "prot_g", "fat_g"]].multiply(grams, axis=0).sum()
             r = {

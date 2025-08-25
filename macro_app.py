@@ -18,6 +18,13 @@ def _safe_rerun():
 # Configuración de la página
 # =============================
 st.set_page_config(page_title="APP DIETA · Planificador de platos", layout="wide")
+# === Estilos y título principal ===
+st.markdown("""
+<style>
+  h1, h2, h3 { color: #0ea5e9 !important; }
+</style>
+""", unsafe_allow_html=True)
+st.title("APP Creador Recetas")
 
 # =============================
 # Utilidades generales
@@ -284,15 +291,6 @@ st.sidebar.caption("Día BAJO")
 st.sidebar.number_input("Carbohidratos (g/kg) - BAJO", value=carbs_bajo_gkg, step=0.01, format="%.2f", disabled=True, key="c_bajo_gkg_ro")
 
 # Tabla integrada de g/kg por tipo de día
-st.sidebar.markdown("---")
-st.sidebar.caption("Resumen g/kg por tipo de día")
-perkg_df = pd.DataFrame([
-    {"Día": "ALTO", "Proteína (g/kg)": p_alto, "Grasa (g/kg)": g_alto, "Carbohidratos (g/kg)": carbs_alto_gkg},
-    {"Día": "MEDIO", "Proteína (g/kg)": p_medio, "Grasa (g/kg)": g_medio, "Carbohidratos (g/kg)": carbs_medio_gkg},
-    {"Día": "BAJO", "Proteína (g/kg)": p_bajo, "Grasa (g/kg)": g_bajo, "Carbohidratos (g/kg)": carbs_bajo_gkg},
-])
-st.sidebar.table(perkg_df)
-
 st.sidebar.markdown("---")
 uploaded = st.sidebar.file_uploader("Sube tu Excel de alimentos (opcional)", type=["xlsx"])
 

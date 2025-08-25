@@ -425,18 +425,13 @@ st.info(f"Objetivo para {meal} → {kcal_target:.0f} kcal | Prot: {p_target:.0f}
 st.markdown("### Creador de receta")
 if foods.empty:
     st.warning("Primero sube o coloca en la carpeta un Excel de alimentos (alimentos_800_especificos.xlsx).")
-else:
-    fcol1, fcol2, fcol3 = st.columns(3)
+else:    fcol1, fcol2 = st.columns(2)
     with fcol1:
-        sel_cat = st.selectbox("Filtrar por categoría", ["(Todas)"] + sorted(foods["Categoría"].astype(str).unique().tolist()))
-    with fcol2:
         sel_sub = st.selectbox("Filtrar por subcategoría", ["(Todas)"] + sorted(foods["Subcategoría"].astype(str).unique().tolist()))
-    with fcol3:
+    with fcol2:
         search = st.text_input("Buscar por nombre/marca contiene…", "")
 
     df_view = foods.copy()
-    if sel_cat != "(Todas)":
-        df_view = df_view[df_view["Categoría"] == sel_cat]
     if sel_sub != "(Todas)":
         df_view = df_view[df_view["Subcategoría"] == sel_sub]
     if search.strip():
@@ -465,16 +460,28 @@ else:
     if not selected.empty:
         # Editor de gramos con persistencia en session_state
         editor_key = f"editor_{meal}"
+        lock_key = f"{editor_key}_locked"
         current_products = selected["Producto"].tolist()
         prev_products = st.session_state.get(editor_key + "_products")
 
         if prev_products != current_products:
+            # inicializar o re-sincronizar (con columna de bloqueo)
             base_df = selected[["Producto", "carb_g", "prot_g", "fat_g", "kcal_g"]].copy()
-            base_df.insert(1, "Gramos (g)", 0.0)
+            # traer locks antiguos si existen
+            old_locks = st.session_state.get(lock_key, {})
+            locks = {p: bool(old_locks.get(p, False)) for p in base_df["Producto"].tolist()}
+            base_df.insert(1, "Bloqueado", pd.Series([locks[p] for p in base_df["Producto"]]))
+            base_df.insert(2, "Gramos (g)", 0.0)
             st.session_state[editor_key] = base_df
             st.session_state[editor_key + "_products"] = current_products
+            st.session_state[lock_key] = locks
 
         editor_df = st.session_state[editor_key]
+        # Asegurar columna 'Bloqueado' existe (migración de sesiones antiguas)
+        if "Bloqueado" not in editor_df.columns:
+            locks = st.session_state.get(lock_key, {p: False for p in editor_df["Producto"].tolist()})
+            editor_df.insert(1, "Bloqueado", editor_df["Producto"].map(lambda p: bool(locks.get(p, False))))
+            st.session_state[editor_key] = editor_df
         st.write("Introduce gramos (puedes dejar a 0 y usar el ajuste automático):")
         editor_df = st.data_editor(
             editor_df,
@@ -483,6 +490,11 @@ else:
             hide_index=True,
             column_config={
                 "Producto": st.column_config.TextColumn(disabled=True),
+                "Bloqueado": st.column_config.CheckboxColumn(
+                    "Bloquear 🔒",
+                    help="Si está marcado, este ingrediente no se ajustará en el ajuste automático.",
+                    default=False,
+                ),
                 "carb_g": st.column_config.NumberColumn("carb/g", help="Carbohidratos por gramo", disabled=True),
                 "prot_g": st.column_config.NumberColumn("prot/g", help="Proteínas por gramo", disabled=True),
                 "fat_g": st.column_config.NumberColumn("fat/g", help="Grasas por gramo", disabled=True),
@@ -491,6 +503,14 @@ else:
             },
         )
         st.session_state[editor_key] = editor_df
+        # Sincronizar locks desde la tabla (auto-desbloquear si gramos == 0)
+        locks = st.session_state.get(lock_key, {})
+        for _, r in editor_df.iterrows():
+            p = r["Producto"]
+            g = float(r["Gramos (g)"]) if pd.notna(r["Gramos (g)"]) else 0.0
+            checked = bool(r.get("Bloqueado", False))
+            locks[p] = False if g == 0 else checked
+        st.session_state[lock_key] = locks
 
         # Cálculo de totales actuales
         grams = editor_df["Gramos (g)"].to_numpy()
@@ -513,17 +533,34 @@ else:
         # 1) Ajustar TODOS los ingredientes (cuadrar macros totales)
         with btn_col1:
             if st.button("Ajustar TODOS (cuadrar macros)"):
-                A = editor_df[["carb_g", "prot_g", "fat_g"]].to_numpy().T  # 3 x N
+                A_full = editor_df[["carb_g", "prot_g", "fat_g"]].to_numpy().T  # 3 x N
                 b = np.array([c_target, p_target, f_target], dtype=float)
-                if A.size == 0 or not np.isfinite(A).any():
-                    st.warning("No hay datos válidos para ajustar.")
-                else:
-                    x = nnls_iterative(A, b, max_iter=50)
-                    editor_df.loc[:, "Gramos (g)"] = x
-                    st.session_state[editor_key] = editor_df
-                    st.success("Gramos ajustados para todos los alimentos según los objetivos de macros.")
+                products = editor_df["Producto"].tolist()
+                grams_now = editor_df["Gramos (g)"].to_numpy().astype(float)
+                locks = st.session_state.get(lock_key, {p: False for p in products})
+                locked_idx = [i for i, p in enumerate(products) if locks.get(p, False)]
+                unlocked_idx = [i for i, p in enumerate(products) if not locks.get(p, False)]
 
-        # 2) Ajustar SOLO un ingrediente seleccionado por el usuario
+                if len(unlocked_idx) == 0:
+                    st.info("Todos los ingredientes están bloqueados (editados manualmente). Pon alguno a 0 para desbloquearlo y poder ajustarlo.")
+                else:
+                    # Restar contribución de los bloqueados al objetivo
+                    if len(locked_idx) > 0:
+                        A_lock = A_full[:, locked_idx]
+                        g_lock = grams_now[locked_idx]
+                        b_res = b - A_lock @ g_lock
+                    else:
+                        b_res = b
+                    A_un = A_full[:, unlocked_idx]
+                    x_un = nnls_iterative(A_un, b_res, max_iter=50)
+                    new_grams = grams_now.copy()
+                    new_grams[unlocked_idx] = x_un
+                    editor_df.loc[:, "Gramos (g)"] = new_grams
+                    st.session_state[editor_key] = editor_df
+                    st.session_state[editor_key + "_programmatic"] = True
+                    st.success("Gramos ajustados para los ingredientes desbloqueados.")
+                    _safe_rerun()
+
         with btn_col2:
             ing_choice = st.selectbox(
                 "Ingrediente a ajustar (solo este)", editor_df["Producto"].tolist(), key=f"single_sel_{meal}"
@@ -552,6 +589,7 @@ else:
                     new_val = max(0.0, current_g + g_delta)
                     editor_df.loc[editor_df["Producto"] == ing_choice, "Gramos (g)"] = new_val
                     st.session_state[editor_key] = editor_df
+                    st.session_state[editor_key + "_programmatic"] = True
                     msg = "aumentados" if g_delta >= 0 else "reducidos"
                     st.success(
                         f"Gramos {msg} en '{ing_choice}' en {abs(g_delta):.0f} g (nuevo total: {new_val:.0f} g)."

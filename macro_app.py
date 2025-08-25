@@ -179,14 +179,6 @@ st.sidebar.number_input(
     key="c_bajo_readonly",
 )
 
-
-st.sidebar.markdown("---")
-adj_pct = st.sidebar.slider("Ajuste de calorías totales (%)", min_value=-25, max_value=25, value=0, step=1)
-
-st.sidebar.markdown("---")
-uploaded = st.sidebar.file_uploader("Sube tu Excel de alimentos (opcional)", type=["xlsx"])
-
-
 # Cargar datos
 if uploaded is not None:
     foods = load_foods(uploaded)

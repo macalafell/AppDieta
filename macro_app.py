@@ -144,6 +144,10 @@ def carbs_for_day(mult, p_gkg, f_gkg, adj_pct_value):
     c_day_x = max(0.0, (tdee_x - (p_day_x*4 + f_day_x*9)) / 4.0)
     return round(float(c_day_x), 1)
 
+carbs_alto  = carbs_for_day(mult_alto,  p_alto,  g_alto,  adj_pct)
+carbs_medio = carbs_for_day(mult_medio, p_medio, g_medio, adj_pct)
+carbs_bajo  = carbs_for_day(mult_bajo,  p_bajo,  g_bajo,  adj_pct)
+
 st.sidebar.caption("Día ALTO")
 st.sidebar.number_input(
     "Carbohidratos (g/día) - ALTO",
@@ -164,6 +168,7 @@ st.sidebar.number_input(
     value=carbs_bajo, step=0.1, format="%.1f",
     disabled=True, key="c_bajo_readonly",
 )
+
 # Cargar datos
 if uploaded is not None:
     foods = load_foods(uploaded)

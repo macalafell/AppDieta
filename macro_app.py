@@ -410,7 +410,8 @@ st.download_button(
 # Objetivos por comida seleccionada
 # =============================
 
-meal = st.selectbox("Comida", ["Desayuno", "Almuerzo", "Merienda", "Cena"])
+st.markdown("### Comida")
+meal = st.selectbox("", ["Desayuno", "Almuerzo", "Merienda", "Cena"], label_visibility="collapsed")
 perc = meal_defaults[meal]
 p_target = p_day * perc["prot"]
 f_target = f_day * perc["fat"]

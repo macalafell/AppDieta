@@ -132,15 +132,9 @@ st.sidebar.caption("Día BAJO")
 p_bajo = st.sidebar.number_input("Proteína (g/kg) - BAJO", value=2.0, step=0.1)
 g_bajo = st.sidebar.number_input("Grasa (g/kg) - BAJO", value=1.5, step=0.1)
 
+# === Carbohidratos (g/día) calculados por tipo de día — NO editable ===
 st.sidebar.markdown("---")
-adj_pct = st.sidebar.slider("Ajuste de calorías totales (%)", min_value=-25, max_value=25, value=0, step=1)
-
-st.sidebar.markdown("---")
-uploaded = st.sidebar.file_uploader("Sube tu Excel de alimentos (opcional)", type=["xlsx"])
-
-# >>> NUEVO: resumen de CARBOHIDRATOS (g/día) por tipo de día, calculados automáticamente
-st.sidebar.markdown("---")
-st.sidebar.subheader("Carbohidratos estimados por tipo de día")
+st.sidebar.subheader("Carbohidratos (g/día) calculados")
 
 def carbs_for_day(mult, p_gkg, f_gkg):
     tdee_x = mifflin_st_jeor_bmr(sex, weight, height, age) * mult
@@ -148,16 +142,49 @@ def carbs_for_day(mult, p_gkg, f_gkg):
     p_day_x = p_gkg * weight
     f_day_x = f_gkg * weight
     c_day_x = max(0.0, (tdee_x - (p_day_x*4 + f_day_x*9)) / 4.0)
-    return round(c_day_x, 1)
+    return round(float(c_day_x), 1)
 
-carbs_row = {
-    "Alto": carbs_for_day(mult_alto, p_alto, g_alto),
-    "Medio": carbs_for_day(mult_medio, p_medio, g_medio),
-    "Bajo": carbs_for_day(mult_bajo, p_bajo, g_bajo),
-}
-st.sidebar.table(
-    pd.DataFrame([carbs_row]).T.rename(columns={0: "Carbohidratos (g/día)"})
+carbs_alto  = carbs_for_day(mult_alto,  p_alto,  g_alto)
+carbs_medio = carbs_for_day(mult_medio, p_medio, g_medio)
+carbs_bajo  = carbs_for_day(mult_bajo,  p_bajo,  g_bajo)
+
+# Mismo estilo que los selectores de proteína/grasas (caption + number_input)
+st.sidebar.caption("Día ALTO")
+st.sidebar.number_input(
+    "Carbohidratos (g/día) - ALTO",
+    value=carbs_alto,
+    step=0.1,
+    format="%.1f",
+    disabled=True,
+    key="c_alto_readonly",
 )
+
+st.sidebar.caption("Día MEDIO")
+st.sidebar.number_input(
+    "Carbohidratos (g/día) - MEDIO",
+    value=carbs_medio,
+    step=0.1,
+    format="%.1f",
+    disabled=True,
+    key="c_medio_readonly",
+)
+
+st.sidebar.caption("Día BAJO")
+st.sidebar.number_input(
+    "Carbohidratos (g/día) - BAJO",
+    value=carbs_bajo,
+    step=0.1,
+    format="%.1f",
+    disabled=True,
+    key="c_bajo_readonly",
+)
+
+
+st.sidebar.markdown("---")
+adj_pct = st.sidebar.slider("Ajuste de calorías totales (%)", min_value=-25, max_value=25, value=0, step=1)
+
+st.sidebar.markdown("---")
+uploaded = st.sidebar.file_uploader("Sube tu Excel de alimentos (opcional)", type=["xlsx"])
 
 
 # Cargar datos

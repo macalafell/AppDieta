@@ -132,6 +132,28 @@ st.sidebar.caption("Día BAJO")
 p_bajo = st.sidebar.number_input("Proteína (g/kg) - BAJO", value=2.0, step=0.1)
 g_bajo = st.sidebar.number_input("Grasa (g/kg) - BAJO", value=1.5, step=0.1)
 
+# Cargar datos
+if uploaded is not None:
+    foods = load_foods(uploaded)
+else:
+    # Intentar encontrar un archivo por defecto en la carpeta
+    default_path = "alimentos_800_especificos.xlsx"
+    if os.path.exists(default_path):
+        foods = load_foods(default_path)
+    else:
+        foods = pd.DataFrame()
+
+# -----------------------------
+# Cálculos diarios
+# -----------------------------
+bmr = mifflin_st_jeor_bmr(sex, weight, height, age)
+
+tipo_dia = st.selectbox("Tipo de día", ["Alto", "Medio", "Bajo"])
+
+mult = {"Alto": mult_alto, "Medio": mult_medio, "Bajo": mult_bajo}[tipo_dia]
+tdee = bmr * mult
+tdee = tdee * (1 + adj_pct/100.0)
+
 # === Carbohidratos (g/día) calculados por tipo de día — NO editable ===
 st.sidebar.markdown("---")
 st.sidebar.subheader("Carbohidratos (g/día) calculados")
@@ -168,28 +190,6 @@ st.sidebar.number_input(
     value=carbs_bajo, step=0.1, format="%.1f",
     disabled=True, key="c_bajo_readonly",
 )
-
-# Cargar datos
-if uploaded is not None:
-    foods = load_foods(uploaded)
-else:
-    # Intentar encontrar un archivo por defecto en la carpeta
-    default_path = "alimentos_800_especificos.xlsx"
-    if os.path.exists(default_path):
-        foods = load_foods(default_path)
-    else:
-        foods = pd.DataFrame()
-
-# -----------------------------
-# Cálculos diarios
-# -----------------------------
-bmr = mifflin_st_jeor_bmr(sex, weight, height, age)
-
-tipo_dia = st.selectbox("Tipo de día", ["Alto", "Medio", "Bajo"])
-
-mult = {"Alto": mult_alto, "Medio": mult_medio, "Bajo": mult_bajo}[tipo_dia]
-tdee = bmr * mult
-tdee = tdee * (1 + adj_pct/100.0)
 
 # Macros diarios objetivo
 p_day = {"Alto": p_alto, "Medio": p_medio, "Bajo": p_bajo}[tipo_dia] * weight

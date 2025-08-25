@@ -8,11 +8,11 @@ from io import BytesIO
 from typing import Dict, List, Optional
 
 def _safe_rerun():
-    """Compatibilidad Streamlit: usa st.rerun() si existe; si no, _safe_rerun()."""
+    """Compatibilidad Streamlit: usa st.rerun() si existe; si no, st.experimental_rerun()."""
     if hasattr(st, "rerun"):
         st.rerun()
     elif hasattr(st, "experimental_rerun"):
-        _safe_rerun()
+        st.experimental_rerun()
 
 # =============================
 # Configuración de la página
@@ -250,10 +250,22 @@ height = st.sidebar.number_input("Altura (cm)", min_value=120.0, max_value=230.0
 age = st.sidebar.number_input("Edad (años)", min_value=14, max_value=100, value=35, step=1)
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("Multiplicadores por tipo de día")
-mult_alto = st.sidebar.number_input("Alto", value=1.60, step=0.01, format="%.2f")
-mult_medio = st.sidebar.number_input("Medio", value=1.55, step=0.01, format="%.2f")
-mult_bajo = st.sidebar.number_input("Bajo", value=1.50, step=0.01, format="%.2f")
+st.sidebar.subheader("Objetivo calórico por tipo de día")
+cal_mode = st.sidebar.radio("Modo", ["Multiplicador", "Kcal manual"], horizontal=True)
+
+if cal_mode == "Multiplicador":
+    mult_alto = st.sidebar.number_input("Alto", value=1.60, step=0.01, format="%.2f")
+    mult_medio = st.sidebar.number_input("Medio", value=1.55, step=0.01, format="%.2f")
+    mult_bajo = st.sidebar.number_input("Bajo", value=1.50, step=0.01, format="%.2f")
+    # Valores por defecto para extras (no usados en este modo)
+    extra_alto = extra_medio = extra_bajo = 0.0
+else:
+    st.sidebar.caption("Añade o resta kcal al BMR por tipo de día")
+    extra_alto = st.sidebar.number_input("Kcal extra - ALTO", value=0, step=10, min_value=-2000, max_value=2000)
+    extra_medio = st.sidebar.number_input("Kcal extra - MEDIO", value=0, step=10, min_value=-2000, max_value=2000)
+    extra_bajo = st.sidebar.number_input("Kcal extra - BAJO", value=0, step=10, min_value=-2000, max_value=2000)
+    # Valores por defecto para multiplicadores (no usados en este modo)
+    mult_alto = mult_medio = mult_bajo = 1.0
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("Macros diarios por tipo de día (g/kg de peso)")
@@ -274,17 +286,27 @@ adj_pct = st.sidebar.slider("Ajuste de calorías totales (%)", min_value=-25, ma
 st.sidebar.markdown("---")
 st.sidebar.subheader("Carbohidratos (g/kg) calculados")
 
-def carbs_g_per_kg_for_day(mult: float, p_gkg: float, f_gkg: float, adj_pct_value: float) -> float:
-    bmr = mifflin_st_jeor_bmr(sex, weight, height, age)
-    tdee_x = bmr * mult * (1 + adj_pct_value / 100.0)
+def _tdee_by_method(day_label: str, adj_pct_value: float) -> float:
+    bmr_local = mifflin_st_jeor_bmr(sex, weight, height, age)
+    if cal_mode == "Multiplicador":
+        mult_map = {"Alto": mult_alto, "Medio": mult_medio, "Bajo": mult_bajo}
+        base = bmr_local * mult_map[day_label]
+    else:
+        extra_map = {"Alto": float(extra_alto), "Medio": float(extra_medio), "Bajo": float(extra_bajo)}
+        base = bmr_local + extra_map[day_label]
+    return base * (1 + adj_pct_value / 100.0)
+
+
+def carbs_g_per_kg_for_day(day_label: str, p_gkg: float, f_gkg: float, adj_pct_value: float) -> float:
+    tdee_x = _tdee_by_method(day_label, adj_pct_value)
     p_day_x = p_gkg * weight
     f_day_x = f_gkg * weight
     c_day_x = max(0.0, (tdee_x - (p_day_x * 4 + f_day_x * 9)) / 4.0)  # g/día
     return round(float(c_day_x / weight), 2)  # g/kg
 
-carbs_alto_gkg = carbs_g_per_kg_for_day(mult_alto, p_alto, g_alto, adj_pct)
-carbs_medio_gkg = carbs_g_per_kg_for_day(mult_medio, p_medio, g_medio, adj_pct)
-carbs_bajo_gkg = carbs_g_per_kg_for_day(mult_bajo, p_bajo, g_bajo, adj_pct)
+carbs_alto_gkg = carbs_g_per_kg_for_day("Alto", p_alto, g_alto, adj_pct)
+carbs_medio_gkg = carbs_g_per_kg_for_day("Medio", p_medio, g_medio, adj_pct)
+carbs_bajo_gkg = carbs_g_per_kg_for_day("Bajo", p_bajo, g_bajo, adj_pct)
 
 st.sidebar.caption("Día ALTO")
 st.sidebar.number_input("Carbohidratos (g/kg) - ALTO", value=carbs_alto_gkg, step=0.01, format="%.2f", disabled=True, key="c_alto_gkg_ro")
@@ -307,9 +329,17 @@ foods = load_foods(uploaded)
 # =============================
 
 bmr = mifflin_st_jeor_bmr(sex, weight, height, age)
+
+# Selección de tipo de día y TDEE según modo
 tipo_dia = st.selectbox("Tipo de día", ["Alto", "Medio", "Bajo"])
-mult = {"Alto": mult_alto, "Medio": mult_medio, "Bajo": mult_bajo}[tipo_dia]
-tdee = bmr * mult * (1 + adj_pct / 100.0)
+if cal_mode == "Multiplicador":
+    mult_map = {"Alto": mult_alto, "Medio": mult_medio, "Bajo": mult_bajo}
+    base_tdee = bmr * mult_map[tipo_dia]
+else:
+    extra_map = {"Alto": float(extra_alto), "Medio": float(extra_medio), "Bajo": float(extra_bajo)}
+    base_tdee = bmr + extra_map[tipo_dia]
+
+tdee = base_tdee * (1 + adj_pct / 100.0)
 
 # Macros diarios objetivo (g/día)
 p_day = {"Alto": p_alto, "Medio": p_medio, "Bajo": p_bajo}[tipo_dia] * weight

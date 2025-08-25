@@ -5,7 +5,7 @@ import os
 import re
 import unicodedata
 from io import BytesIO
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 # =============================
 # Configuración de la página
@@ -41,7 +41,9 @@ def kcal_from_macros(carb_g: float, prot_g: float, fat_g: float) -> float:
 
 def mifflin_st_jeor_bmr(sex: str, weight_kg: float, height_cm: float, age: int) -> float:
     sex_n = _norm_txt(sex)
-    if sex_n.startswith("h") or sex_n.startswith("m") or sex_n == "hombre":
+    # Clasificación explícita para evitar confundir "Mujer" como masculino
+    male_tokens = {"hombre", "masculino", "varon", "varón", "male", "man"}
+    if sex_n in male_tokens:
         return 10 * weight_kg + 6.25 * height_cm - 5 * age + 5
     return 10 * weight_kg + 6.25 * height_cm - 5 * age - 161
 
@@ -76,7 +78,7 @@ CARB_PER_100G_KEYS = ["carbohidratos (g/100g)", "hidratos (g/100g)", "carbs (g/1
 PROT_PER_G_KEYS = ["proteinas (g/g)", "proteínas (g/g)", "protein (g/g)"]
 PROT_PER_100G_KEYS = ["proteinas (g/100g)", "proteínas (g/100g)", "protein (g/100g)"]
 
-FAT_PER_G_KEYS = ["grasas (g/g)", "lipidos (g/g)", "lipidos (g/g)"]
+FAT_PER_G_KEYS = ["grasas (g/g)", "lipidos (g/g)"]
 FAT_PER_100G_KEYS = ["grasas (g/100g)", "lipidos (g/100g)"]
 
 
@@ -195,7 +197,7 @@ def load_foods(uploaded) -> pd.DataFrame:
 def nnls_iterative(A: np.ndarray, b: np.ndarray, max_iter: int = 50, tol: float = 1e-9) -> np.ndarray:
     """
     Resuelve min ||A x - b|| con x>=0 de forma iterativa (active-set simple).
-    - Escala columnas para mejorar acondicionamiento.
+    - Escala columnas para mejorar acondicionamiento (desescalado correcto al final).
     - Si la primera fila (kcal) es redundante con macros, se elimina.
     """
     A = np.asarray(A, dtype=float)
@@ -214,20 +216,22 @@ def nnls_iterative(A: np.ndarray, b: np.ndarray, max_iter: int = 50, tol: float 
     col_scale[col_scale == 0] = 1.0
     A_s = A / col_scale
 
-    x = np.maximum(0.0, np.linalg.lstsq(A_s, b, rcond=None)[0])
+    # Trabajamos en espacio escalado: y = argmin ||A_s y - b||
+    y = np.maximum(0.0, np.linalg.lstsq(A_s, b, rcond=None)[0])
     for _ in range(max_iter):
-        neg = x < 0
+        neg = y < 0
         if not neg.any():
             break
         keep = ~neg
         if keep.sum() == 0:
-            return np.zeros_like(x)
+            return np.zeros_like(y)
         A_sub = A_s[:, keep]
-        x_sub = np.maximum(0.0, np.linalg.lstsq(A_sub, b, rcond=None)[0])
-        x = np.zeros_like(x)
-        x[keep] = x_sub
+        y_sub = np.maximum(0.0, np.linalg.lstsq(A_sub, b, rcond=None)[0])
+        y = np.zeros_like(y)
+        y[keep] = y_sub
 
-    x = np.maximum(0.0, x) * col_scale  # deshacer escalado
+    # Volver a variables originales: x = y / col_scale
+    x = np.maximum(0.0, y) / col_scale
     return x
 
 
@@ -304,19 +308,19 @@ mult = {"Alto": mult_alto, "Medio": mult_medio, "Bajo": mult_bajo}[tipo_dia]
 tdee = bmr * mult * (1 + adj_pct / 100.0)
 
 # Macros diarios objetivo
-a_p = {"Alto": p_alto, "Medio": p_medio, "Bajo": p_bajo}[tipo_dia] * weight
-a_f = {"Alto": g_alto, "Medio": g_medio, "Bajo": g_bajo}[tipo_dia] * weight
-kcal_from_p_f = a_p * 4 + a_f * 9
-a_c = max(0.0, (tdee - kcal_from_p_f) / 4.0)
+p_day = {"Alto": p_alto, "Medio": p_medio, "Bajo": p_bajo}[tipo_dia] * weight
+f_day = {"Alto": g_alto, "Medio": g_medio, "Bajo": g_bajo}[tipo_dia] * weight
+kcal_from_p_f = p_day * 4 + f_day * 9
+c_day = max(0.0, (tdee - kcal_from_p_f) / 4.0)
 
 left, right = st.columns([1, 1])
 with left:
     st.metric("BMR (kcal/día)", f"{bmr:.0f}")
     st.metric("TDEE (kcal/día)", f"{tdee:.0f}")
 with right:
-    st.metric("Proteína (g/día)", f"{a_p:.0f}")
-    st.metric("Grasa (g/día)", f"{a_f:.0f}")
-    st.metric("Carbohidratos (g/día)", f"{a_c:.0f}")
+    st.metric("Proteína (g/día)", f"{p_day:.0f}")
+    st.metric("Grasa (g/día)", f"{f_day:.0f}")
+    st.metric("Carbohidratos (g/día)", f"{c_day:.0f}")
 
 # =============================
 # Reparto por comida (editable)
@@ -331,7 +335,6 @@ meal_defaults = {
 }
 
 with st.expander("Editar porcentajes de reparto por comida (proporción del día)"):
-    total_warn = 0.0
     for key in meal_defaults:
         st.write(f"**{key}**")
         meal_defaults[key]["prot"] = st.number_input(
@@ -343,16 +346,15 @@ with st.expander("Editar porcentajes de reparto por comida (proporción del día
         meal_defaults[key]["carb"] = st.number_input(
             f"Hidratos ({key})", value=float(meal_defaults[key]["carb"]), step=0.01, format="%.2f", key=f"c_{key}"
         )
-    # Aviso si las proporciones no suman cercano a 1
-    sums = {
-        m: meal_defaults[m]["prot"] + meal_defaults[m]["fat"] + meal_defaults[m]["carb"] for m in meal_defaults
-    }
-    s_total = sum(sums.values())
-    if not (0.95 <= s_total <= 1.05):
-        st.warning(
-            f"La suma de proporciones (prot+grasa+carb) entre todas las comidas es {s_total:.2f}. "
-            "Idealmente debería ser ≈ 1.0."
-        )
+
+    # Aviso si las proporciones por macro no suman ≈ 1 entre todas las comidas
+    totals = {k: sum(meal_defaults[m][k] for m in meal_defaults) for k in ("prot", "fat", "carb")}
+    warn_msgs = []
+    for k, v in totals.items():
+        if not (0.95 <= v <= 1.05):
+            warn_msgs.append(f"suma {k} = {v:.2f}")
+    if warn_msgs:
+        st.warning("; ".join(warn_msgs) + ". Idealmente cada macro debe sumar ≈ 1.00 entre todas las comidas.")
 
 # =============================
 # Resumen de macros por comida + exportar Excel
@@ -362,9 +364,9 @@ st.markdown("### Resumen de macros por comida")
 
 
 def meal_targets(meal_name: str, perc: Dict[str, float]) -> Dict[str, float]:
-    p_t = a_p * perc["prot"]
-    f_t = a_f * perc["fat"]
-    c_t = a_c * perc["carb"]
+    p_t = p_day * perc["prot"]
+    f_t = f_day * perc["fat"]
+    c_t = c_day * perc["carb"]
     kcal_t = c_t * 4 + p_t * 4 + f_t * 9
     return {
         "Comida": meal_name,
@@ -401,9 +403,9 @@ st.download_button(
 
 meal = st.selectbox("Comida", ["Desayuno", "Comida", "Merienda", "Cena"])
 perc = meal_defaults[meal]
-p_target = a_p * perc["prot"]
-f_target = a_f * perc["fat"]
-c_target = a_c * perc["carb"]
+p_target = p_day * perc["prot"]
+f_target = f_day * perc["fat"]
+c_target = c_day * perc["carb"]
 kcal_target = c_target * 4 + p_target * 4 + f_target * 9
 st.info(
     f"Objetivo para {meal} → {kcal_target:.0f} kcal | Prot: {p_target:.0f} g | Grasa: {f_target:.0f} g | Hidratos: {c_target:.0f} g"
@@ -439,15 +441,19 @@ else:
             | df_view["Marca"].astype(str).str.lower().str.contains(s)
         ]
 
-    # FIX: renombrar columnas después de seleccionar por nombres reales
+    # Mostrar tabla con nombres amigables (fix KeyError)
     view_cols = ["Producto", "Marca", "kcal_g", "carb_g", "prot_g", "fat_g"]
-    st.dataframe(
-        df_view[view_cols].rename(
-            columns={"kcal_g": "kcal/g", "carb_g": "carb/g", "prot_g": "prot/g", "fat_g": "fat/g"}
-        ),
-        use_container_width=True,
-        height=300,
-    )
+    missing = [c for c in view_cols if c not in df_view.columns]
+    if missing:
+        st.error(f"Faltan columnas esperadas en los datos normalizados: {missing}")
+    else:
+        st.dataframe(
+            df_view[view_cols].rename(
+                columns={"kcal_g": "kcal/g", "carb_g": "carb/g", "prot_g": "prot/g", "fat_g": "fat/g"}
+            ),
+            use_container_width=True,
+            height=300,
+        )
 
     choices = st.multiselect("Elige alimentos para la receta", df_view["Producto"].tolist())
     selected = df_view[df_view["Producto"].isin(choices)].drop_duplicates("Producto").reset_index(drop=True)

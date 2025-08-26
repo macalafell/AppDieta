@@ -341,7 +341,12 @@ try:
 except Exception:
     _p_val = {"Alto": p_alto, "Medio": p_medio, "Bajo": p_bajo}[tipo_dia] * weight
     _f_val = {"Alto": g_alto, "Medio": g_medio, "Bajo": g_bajo}[tipo_dia] * weight
-    _tdee_local = _tdee_by_method(tipo_dia, adj_pct)
+    # Calcular TDEE local sin depender de helper externo
+    if cal_mode == "Multiplicador":
+        _base = bmr * {"Alto": mult_alto, "Medio": mult_medio, "Bajo": mult_bajo}[tipo_dia]
+    else:
+        _base = bmr + {"Alto": float(extra_alto), "Medio": float(extra_medio), "Bajo": float(extra_bajo)}[tipo_dia]
+    _tdee_local = _base * (1 + adj_pct / 100.0)
     _c_val = max(0.0, (_tdee_local - (_p_val * 4 + _f_val * 9)) / 4.0)
 
 macros_daily_df = pd.DataFrame(

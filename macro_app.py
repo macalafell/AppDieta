@@ -8,6 +8,7 @@ from io import BytesIO
 from typing import Dict, List, Optional
 import altair as alt
 
+
 def _safe_rerun():
     """Compatibilidad Streamlit: usa st.rerun() si existe; si no, st.experimental_rerun()."""
     if hasattr(st, "rerun"):
@@ -15,19 +16,22 @@ def _safe_rerun():
     elif hasattr(st, "experimental_rerun"):
         st.experimental_rerun()
 
+
 # =============================
 # Configuración de la página
 # =============================
 st.set_page_config(page_title="APP DIETA · Planificador de platos", layout="wide")
-# === Estilos y título principal ===
+
+# === Estilos globales (títulos #BB4430) ===
 st.markdown("""
 <style>
-  h1, h2, h3 { color: #0ea5e9 !important; }
+  h1, h2, h3 { color: #BB4430 !important; }
   /* Evitar solapes en encabezado del expander */
   div.streamlit-expanderHeader { white-space: normal !important; overflow: hidden; }
   div.streamlit-expanderHeader p { margin: 0 !important; }
 </style>
 """, unsafe_allow_html=True)
+
 st.title("APP Creador Recetas")
 
 
@@ -378,14 +382,21 @@ try:
         .mark_arc()
         .encode(
             theta=alt.Theta(field="kcal", type="quantitative"),
-            color=alt.Color(field="Macro", type="nominal"),
+            color=alt.Color(
+                field="Macro",
+                type="nominal",
+                # Colores pedidos: 7EBDC2, F3DFA2, EFE6DD
+                scale=alt.Scale(
+                    domain=["Carbohidratos", "Proteína", "Grasa"],
+                    range=["#7EBDC2", "#F3DFA2", "#EFE6DD"],
+                ),
+            ),
             tooltip=["Macro", "Gramos", "kcal", "% kcal"],
         )
-        .properties(width=350, height=350)
+        .properties(width=360, height=360)
     )
     st.altair_chart(pie, use_container_width=False)
 except Exception:
-    # Fallback simple si Altair no está disponible
     st.bar_chart(macros_daily_df.set_index("Macro")["kcal"])
 
 # =============================
@@ -427,7 +438,6 @@ with st.expander("Editar reparto (proporción del día)"):
 
 st.markdown("### Resumen de macros por comida")
 
-
 def meal_targets(meal_name: str, perc: Dict[str, float]) -> Dict[str, float]:
     p_t = p_day * perc["prot"]
     f_t = f_day * perc["fat"]
@@ -458,8 +468,66 @@ total_row = {
 }
 meals_summary_tot = pd.concat([meals_summary, pd.DataFrame([total_row])], ignore_index=True)
 
-st.dataframe(meals_summary_tot, use_container_width=True)
+# --- Render HTML minimalista con negritas en columna Comida y fila TOTAL ---
+def render_meals_table_html(df: pd.DataFrame) -> str:
+    cols = df.columns.tolist()
+    html = []
+    html.append("""
+    <style>
+      table.meals-summary {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.95rem;
+      }
+      table.meals-summary th, table.meals-summary td {
+        border-bottom: 1px solid rgba(0,0,0,.07);
+        padding: 6px 8px;
+        text-align: right;
+      }
+      table.meals-summary thead th {
+        text-align: left;
+        font-weight: 600;
+      }
+      table.meals-summary th:first-child, table.meals-summary td:first-child {
+        text-align: left;
+        font-weight: 700; /* Columna Comida en negrita */
+      }
+      table.meals-summary tr:last-child td {
+        font-weight: 700; /* Fila TOTAL en negrita */
+      }
+    </style>
+    """)
+    html.append('<table class="meals-summary">')
+    # header
+    html.append("<thead><tr>")
+    for c in cols:
+        html.append(f"<th>{c}</th>")
+    html.append("</tr></thead>")
+    # body
+    html.append("<tbody>")
+    for i, row in df.iterrows():
+        html.append("<tr>")
+        for j, c in enumerate(cols):
+            val = row[c]
+            if isinstance(val, float):
+                # formateo simple
+                if c == "kcal":
+                    cell = f"{val:.0f}"
+                else:
+                    try:
+                        cell = f"{val:.1f}"
+                    except Exception:
+                        cell = f"{val}"
+            else:
+                cell = str(val)
+            html.append(f"<td>{cell}</td>")
+        html.append("</tr>")
+    html.append("</tbody></table>")
+    return "".join(html)
 
+st.markdown(render_meals_table_html(meals_summary_tot), unsafe_allow_html=True)
+
+# Export Excel
 buf_meals = BytesIO()
 with pd.ExcelWriter(buf_meals, engine="openpyxl") as writer:
     meals_summary_tot.to_excel(writer, index=False, sheet_name="Macros por comida")

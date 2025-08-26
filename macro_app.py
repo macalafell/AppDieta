@@ -8,6 +8,65 @@ from io import BytesIO
 from typing import Dict, List, Optional
 import altair as alt
 
+# ==== Paleta (debe ir ANTES de usarla en el CSS) ====
+PALETTE = {
+    "raisin_black": "#231F20",  # fondo oscuro
+    "persian_red":  "#BB4430",  # primario/acento
+    "verdigris":    "#7EBDC2",  # secundario
+    "vanilla":      "#F3DFA2",  # sidebar / paneles
+    "linen":        "#EFE6DD",  # fondo principal
+    "white":        "#FFFFFF",
+}
+
+def _safe_rerun():
+    """Compatibilidad Streamlit: usa st.rerun() si existe; si no, st.experimental_rerun()."""
+    if hasattr(st, "rerun"):
+        st.rerun()
+    elif hasattr(st, "experimental_rerun"):
+        st.experimental_rerun()
+
+# =============================
+# Configuración de la página
+# =============================
+st.set_page_config(page_title="APP DIETA · Planificador de platos", layout="wide")
+
+# === Estilos globales y tema con la paleta ===
+st.markdown(f"""
+<style>
+  /* Fondos principales */
+  [data-testid="stAppViewContainer"] {{
+    background: {PALETTE['linen']};
+  }}
+  [data-testid="stHeader"] {{
+    background: transparent;
+  }}
+  [data-testid="stSidebar"] {{
+    background: {PALETTE['vanilla']};
+    color: {PALETTE['raisin_black']};
+  }}
+
+  /* Tipografía y títulos */
+  h1, h2, h3 {{
+    color: {PALETTE['persian_red']} !important;
+  }}
+  a, .stMarkdown a {{
+    color: {PALETTE['persian_red']} !important;
+  }}
+</style>
+""", unsafe_allow_html=True)
+
+st.title("APP Creador Recetas")
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+import os
+import re
+import unicodedata
+from io import BytesIO
+from typing import Dict, List, Optional
+import altair as alt
+
 def _safe_rerun():
     """Compatibilidad Streamlit: usa st.rerun() si existe; si no, st.experimental_rerun()."""
     if hasattr(st, "rerun"):

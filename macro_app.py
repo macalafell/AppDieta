@@ -420,6 +420,13 @@ with col3:
         macros_daily_df["kcal"] / macros_daily_df["kcal"].sum() * 100
     ).round(1)
 
+    # Paleta solicitada
+    macro_colors = {
+        "Carbohydrates": "#EE9B00",
+        "Protein": "#CA6702",
+        "Fat": "#BB3E03",
+    }
+
     try:
         pie = (
             alt.Chart(macros_daily_df)
@@ -430,8 +437,8 @@ with col3:
                     field="Macro",
                     type="nominal",
                     scale=alt.Scale(
-                        domain=["Carbohydrates", "Protein", "Fat"],
-                        range=["#7EBDC2", "#F3DFA2", "#EFE6DD"],
+                        domain=list(macro_colors.keys()),
+                        range=list(macro_colors.values()),
                     ),
                 ),
                 tooltip=["Macro", "Grams", "kcal", "% kcal"],

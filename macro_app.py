@@ -5,25 +5,29 @@ import os
 import re
 import unicodedata
 from io import BytesIO
-from typing import Dict, List, Optional, Tuple
-import altair as alt
+from typing import Dict, List, Optional
+
+def _safe_rerun():
+    """Compatibilidad Streamlit: usa st.rerun() si existe; si no, st.experimental_rerun()."""
+    if hasattr(st, "rerun"):
+        st.rerun()
+    elif hasattr(st, "experimental_rerun"):
+        st.experimental_rerun()
 
 # =============================
 # Configuración de la página
 # =============================
-st.set_page_config(page_title="APP DIETA · Planificador de platos (refactor)", layout="wide")
-# === Estilos globales (fix solapes y color de títulos) ===
-st.markdown(
-    """
-    <style>
-      h1, h2, h3 { color: #0ea5e9 !important; }
-      /* Evitar solapes en encabezados de expander */
-      div.streamlit-expanderHeader { white-space: normal !important; overflow: hidden; }
-      div.streamlit-expanderHeader p { margin: 0 !important; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+st.set_page_config(page_title="APP DIETA · Planificador de platos", layout="wide")
+# === Estilos y título principal ===
+st.markdown("""
+<style>
+  h1, h2, h3 { color: #0ea5e9 !important; }
+  /* Evitar solapes en encabezado del expander */
+  div.streamlit-expanderHeader { white-space: normal !important; overflow: hidden; }
+  div.streamlit-expanderHeader p { margin: 0 !important; }
+</style>
+""", unsafe_allow_html=True)
+st.title("APP Creador Recetas")
 
 # =============================
 # Utilidades generales
@@ -54,7 +58,8 @@ def kcal_from_macros(carb_g: float, prot_g: float, fat_g: float) -> float:
 
 def mifflin_st_jeor_bmr(sex: str, weight_kg: float, height_cm: float, age: int) -> float:
     sex_n = _norm_txt(sex)
-    if sex_n.startswith("h") or sex_n.startswith("m") or sex_n == "hombre":
+    male_tokens = {"hombre", "masculino", "varon", "varón", "male", "man"}
+    if sex_n in male_tokens:
         return 10 * weight_kg + 6.25 * height_cm - 5 * age + 5
     return 10 * weight_kg + 6.25 * height_cm - 5 * age - 161
 
@@ -89,7 +94,7 @@ CARB_PER_100G_KEYS = ["carbohidratos (g/100g)", "hidratos (g/100g)", "carbs (g/1
 PROT_PER_G_KEYS = ["proteinas (g/g)", "proteínas (g/g)", "protein (g/g)"]
 PROT_PER_100G_KEYS = ["proteinas (g/100g)", "proteínas (g/100g)", "protein (g/100g)"]
 
-FAT_PER_G_KEYS = ["grasas (g/g)", "lipidos (g/g)", "lipidos (g/g)"]
+FAT_PER_G_KEYS = ["grasas (g/g)", "lipidos (g/g)"]
 FAT_PER_100G_KEYS = ["grasas (g/100g)", "lipidos (g/100g)"]
 
 
@@ -103,7 +108,6 @@ def _find_first(cols_map: Dict[str, str], candidates: List[str]) -> Optional[str
 def _normalize_food_df(df: pd.DataFrame) -> pd.DataFrame:
     cols_map = {_norm_txt(c): c for c in df.columns}
 
-    # Columnas base (nombre/marca/categoría)
     name_col = _find_first(cols_map, EXPECTED_NAME_KEYS)
     if not name_col:
         raise ValueError("No se encontró columna de nombre del producto (p. ej., 'Producto'/'Alimento').")
@@ -111,7 +115,6 @@ def _normalize_food_df(df: pd.DataFrame) -> pd.DataFrame:
     cat_col = _find_first(cols_map, EXPECTED_CAT_KEYS)
     subcat_col = _find_first(cols_map, EXPECTED_SUBCAT_KEYS)
 
-    # Nutrientes por gramo
     kcal_g = None
     kcal_g_src = _find_first(cols_map, KCAL_PER_G_KEYS)
     kcal_100_src = _find_first(cols_map, KCAL_PER_100G_KEYS)
@@ -152,17 +155,15 @@ def _normalize_food_df(df: pd.DataFrame) -> pd.DataFrame:
         "carb_g": carb_g,
         "prot_g": prot_g,
         "fat_g": fat_g,
-        "kcal_g": kcal_g,  # puede ser None temporalmente
+        "kcal_g": kcal_g,
     })
 
-    # Si falta kcal_g pero hay macros, derivar
     if clean["kcal_g"].isna().any():
         has_macros = clean[["carb_g", "prot_g", "fat_g"]].notna().all(axis=1)
         clean.loc[has_macros & clean["kcal_g"].isna(), "kcal_g"] = clean.loc[
             has_macros & clean["kcal_g"].isna(), ["carb_g", "prot_g", "fat_g"]
         ].apply(lambda r: kcal_from_macros(r[0], r[1], r[2]), axis=1)
 
-    # Filtrar filas válidas
     clean = clean.dropna(subset=["kcal_g", "carb_g", "prot_g", "fat_g"]).reset_index(drop=True)
     return clean
 
@@ -179,7 +180,6 @@ def _parse_foods_from_bytes(xls_bytes: bytes) -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False)
 def _parse_foods_from_path(path: str, mtime: float) -> pd.DataFrame:
-    # mtime se incluye para invalidar caché cuando el archivo cambie
     xls = pd.ExcelFile(path)
     if "Todos" in xls.sheet_names:
         return _normalize_food_df(pd.read_excel(xls, sheet_name="Todos"))
@@ -202,31 +202,26 @@ def load_foods(uploaded) -> pd.DataFrame:
 
 
 # =============================
-# Solver NNLS (sin SciPy) mejorado
+# Solver NNLS (sin SciPy) para ajustar gramos de TODOS los alimentos
 # =============================
 
-def nnls_iterative(A: np.ndarray, b: np.ndarray, max_iter: int = 50, tol: float = 1e-9) -> np.ndarray:
-    """
-    Resuelve min ||A x - b|| con x>=0 de forma iterativa (active-set simple).
-    - Escala columnas para mejorar acondicionamiento.
-    - Si la primera fila (kcal) es redundante con macros, se elimina.
+def nnls_iterative(A: np.ndarray, b: np.ndarray, max_iter: int = 50) -> np.ndarray:
+    """Resuelve min ||A x - b|| con x>=0 (active set simple) y escala de columnas.
+    - A: matriz (m x n) con densidades por gramo (p.ej., filas=carb/prot/fat; columnas=alimentos)
+    - b: vector objetivo (m,)
+    Devuelve x (n,) en gramos por alimento.
     """
     A = np.asarray(A, dtype=float)
     b = np.asarray(b, dtype=float)
+    if A.ndim != 2 or b.ndim != 1 or A.shape[0] != b.shape[0]:
+        return np.zeros(A.shape[1] if A.ndim == 2 else 0)
 
-    # Detectar redundancia kcal ≈ 4*carb + 4*prot + 9*fat
-    if A.shape[0] >= 4:
-        kcal_row = A[0]
-        approx = 4 * A[1] + 4 * A[2] + 9 * A[3]
-        if np.allclose(kcal_row, approx, rtol=1e-3, atol=1e-3):
-            A = A[1:]  # eliminar fila kcal
-            b = b[1:]
-
-    # Escalado de columnas
+    # Escalado de columnas para mejorar acondicionamiento
     col_scale = np.linalg.norm(A, axis=0)
     col_scale[col_scale == 0] = 1.0
     A_s = A / col_scale
 
+    # Solución LS y poda de negativos iterativamente
     x = np.maximum(0.0, np.linalg.lstsq(A_s, b, rcond=None)[0])
     for _ in range(max_iter):
         neg = x < 0
@@ -240,9 +235,9 @@ def nnls_iterative(A: np.ndarray, b: np.ndarray, max_iter: int = 50, tol: float 
         x = np.zeros_like(x)
         x[keep] = x_sub
 
-    x = np.maximum(0.0, x) * col_scale  # deshacer escalado
+    # Des-escalado
+    x = np.maximum(0.0, x) / col_scale
     return x
-
 
 # =============================
 # Sidebar: Perfil y parámetros
@@ -255,10 +250,22 @@ height = st.sidebar.number_input("Altura (cm)", min_value=120.0, max_value=230.0
 age = st.sidebar.number_input("Edad (años)", min_value=14, max_value=100, value=35, step=1)
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("Multiplicadores por tipo de día")
-mult_alto = st.sidebar.number_input("Alto", value=1.60, step=0.01, format="%.2f")
-mult_medio = st.sidebar.number_input("Medio", value=1.55, step=0.01, format="%.2f")
-mult_bajo = st.sidebar.number_input("Bajo", value=1.50, step=0.01, format="%.2f")
+st.sidebar.subheader("Objetivo calórico por tipo de día")
+cal_mode = st.sidebar.radio("Modo", ["Multiplicador", "Kcal manual"], horizontal=True)
+
+if cal_mode == "Multiplicador":
+    mult_alto = st.sidebar.number_input("Alto", value=1.60, step=0.01, format="%.2f")
+    mult_medio = st.sidebar.number_input("Medio", value=1.55, step=0.01, format="%.2f")
+    mult_bajo = st.sidebar.number_input("Bajo", value=1.50, step=0.01, format="%.2f")
+    # Valores por defecto para extras (no usados en este modo)
+    extra_alto = extra_medio = extra_bajo = 0.0
+else:
+    st.sidebar.caption("Añade o resta kcal al BMR por tipo de día")
+    extra_alto = st.sidebar.number_input("Kcal extra - ALTO", value=0, step=10, min_value=-2000, max_value=2000)
+    extra_medio = st.sidebar.number_input("Kcal extra - MEDIO", value=0, step=10, min_value=-2000, max_value=2000)
+    extra_bajo = st.sidebar.number_input("Kcal extra - BAJO", value=0, step=10, min_value=-2000, max_value=2000)
+    # Valores por defecto para multiplicadores (no usados en este modo)
+    mult_alto = mult_medio = mult_bajo = 1.0
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("Macros diarios por tipo de día (g/kg de peso)")
@@ -275,30 +282,40 @@ g_bajo = st.sidebar.number_input("Grasa (g/kg) - BAJO", value=1.5, step=0.1)
 st.sidebar.markdown("---")
 adj_pct = st.sidebar.slider("Ajuste de calorías totales (%)", min_value=-25, max_value=25, value=0, step=1)
 
+# Carbohidratos autocalculados en g/kg
+st.sidebar.markdown("---")
+st.sidebar.subheader("Carbohidratos (g/kg) calculados")
 
-# === Carbohidratos (g/día) calculados (solo lectura) ===
+def _tdee_by_method(day_label: str, adj_pct_value: float) -> float:
+    bmr_local = mifflin_st_jeor_bmr(sex, weight, height, age)
+    if cal_mode == "Multiplicador":
+        mult_map = {"Alto": mult_alto, "Medio": mult_medio, "Bajo": mult_bajo}
+        base = bmr_local * mult_map[day_label]
+    else:
+        extra_map = {"Alto": float(extra_alto), "Medio": float(extra_medio), "Bajo": float(extra_bajo)}
+        base = bmr_local + extra_map[day_label]
+    return base * (1 + adj_pct_value / 100.0)
 
-def carbs_for_day(mult: float, p_gkg: float, f_gkg: float, adj_pct_value: float) -> float:
-    tdee_x = mifflin_st_jeor_bmr(sex, weight, height, age) * mult
-    tdee_x *= (1 + adj_pct_value / 100.0)
+
+def carbs_g_per_kg_for_day(day_label: str, p_gkg: float, f_gkg: float, adj_pct_value: float) -> float:
+    tdee_x = _tdee_by_method(day_label, adj_pct_value)
     p_day_x = p_gkg * weight
     f_day_x = f_gkg * weight
-    c_day_x = max(0.0, (tdee_x - (p_day_x * 4 + f_day_x * 9)) / 4.0)
-    return round(float(c_day_x), 1)
+    c_day_x = max(0.0, (tdee_x - (p_day_x * 4 + f_day_x * 9)) / 4.0)  # g/día
+    return round(float(c_day_x / weight), 2)  # g/kg
 
-carbs_alto = carbs_for_day(mult_alto, p_alto, g_alto, adj_pct)
-carbs_medio = carbs_for_day(mult_medio, p_medio, g_medio, adj_pct)
-carbs_bajo = carbs_for_day(mult_bajo, p_bajo, g_bajo, adj_pct)
+carbs_alto_gkg = carbs_g_per_kg_for_day("Alto", p_alto, g_alto, adj_pct)
+carbs_medio_gkg = carbs_g_per_kg_for_day("Medio", p_medio, g_medio, adj_pct)
+carbs_bajo_gkg = carbs_g_per_kg_for_day("Bajo", p_bajo, g_bajo, adj_pct)
 
-st.sidebar.markdown("---")
-st.sidebar.subheader("Carbohidratos (g/día) calculados")
 st.sidebar.caption("Día ALTO")
-st.sidebar.number_input("Carbohidratos (g/día) - ALTO", value=carbs_alto, step=0.1, format="%.1f", disabled=True, key="c_alto_readonly")
+st.sidebar.number_input("Carbohidratos (g/kg) - ALTO", value=carbs_alto_gkg, step=0.01, format="%.2f", disabled=True, key="c_alto_gkg_ro")
 st.sidebar.caption("Día MEDIO")
-st.sidebar.number_input("Carbohidratos (g/día) - MEDIO", value=carbs_medio, step=0.1, format="%.1f", disabled=True, key="c_medio_readonly")
+st.sidebar.number_input("Carbohidratos (g/kg) - MEDIO", value=carbs_medio_gkg, step=0.01, format="%.2f", disabled=True, key="c_medio_gkg_ro")
 st.sidebar.caption("Día BAJO")
-st.sidebar.number_input("Carbohidratos (g/día) - BAJO", value=carbs_bajo, step=0.1, format="%.1f", disabled=True, key="c_bajo_readonly")
+st.sidebar.number_input("Carbohidratos (g/kg) - BAJO", value=carbs_bajo_gkg, step=0.01, format="%.2f", disabled=True, key="c_bajo_gkg_ro")
 
+# Tabla integrada de g/kg por tipo de día
 st.sidebar.markdown("---")
 uploaded = st.sidebar.file_uploader("Sube tu Excel de alimentos (opcional)", type=["xlsx"])
 
@@ -308,75 +325,36 @@ uploaded = st.sidebar.file_uploader("Sube tu Excel de alimentos (opcional)", typ
 foods = load_foods(uploaded)
 
 # =============================
-# Cálculos diarios
+# Cálculos diarios (g/día a partir de g/kg y TDEE)
 # =============================
 
 bmr = mifflin_st_jeor_bmr(sex, weight, height, age)
-tipo_dia = st.selectbox("Tipo de día", ["Alto", "Medio", "Bajo"])
-mult = {"Alto": mult_alto, "Medio": mult_medio, "Bajo": mult_bajo}[tipo_dia]
-tdee = bmr * mult * (1 + adj_pct / 100.0)
 
-# Macros diarios objetivo
-a_p = {"Alto": p_alto, "Medio": p_medio, "Bajo": p_bajo}[tipo_dia] * weight
-a_f = {"Alto": g_alto, "Medio": g_medio, "Bajo": g_bajo}[tipo_dia] * weight
-kcal_from_p_f = a_p * 4 + a_f * 9
-a_c = max(0.0, (tdee - kcal_from_p_f) / 4.0)
+# Selección de tipo de día y TDEE según modo
+tipo_dia = st.selectbox("Tipo de día", ["Alto", "Medio", "Bajo"])
+if cal_mode == "Multiplicador":
+    mult_map = {"Alto": mult_alto, "Medio": mult_medio, "Bajo": mult_bajo}
+    base_tdee = bmr * mult_map[tipo_dia]
+else:
+    extra_map = {"Alto": float(extra_alto), "Medio": float(extra_medio), "Bajo": float(extra_bajo)}
+    base_tdee = bmr + extra_map[tipo_dia]
+
+tdee = base_tdee * (1 + adj_pct / 100.0)
+
+# Macros diarios objetivo (g/día)
+p_day = {"Alto": p_alto, "Medio": p_medio, "Bajo": p_bajo}[tipo_dia] * weight
+f_day = {"Alto": g_alto, "Medio": g_medio, "Bajo": g_bajo}[tipo_dia] * weight
+kcal_from_p_f = p_day * 4 + f_day * 9
+c_day = max(0.0, (tdee - kcal_from_p_f) / 4.0)
 
 left, right = st.columns([1, 1])
 with left:
     st.metric("BMR (kcal/día)", f"{bmr:.0f}")
     st.metric("TDEE (kcal/día)", f"{tdee:.0f}")
 with right:
-    st.metric("Proteína (g/día)", f"{a_p:.0f}")
-    st.metric("Grasa (g/día)", f"{a_f:.0f}")
-    st.metric("Carbohidratos (g/día)", f"{a_c:.0f}")
-
-# === Resumen de macros diarios (tabla + gráfico tarta) ===
-st.markdown("### Resumen de macros diarios")
-# Valores robustos aunque el bloque anterior no haya definido aún c_day/p_day/f_day
-try:
-    _c_val = float(c_day)
-    _p_val = float(p_day)
-    _f_val = float(f_day)
-except Exception:
-    _p_val = {"Alto": p_alto, "Medio": p_medio, "Bajo": p_bajo}[tipo_dia] * weight
-    _f_val = {"Alto": g_alto, "Medio": g_medio, "Bajo": g_bajo}[tipo_dia] * weight
-    # Calcular TDEE local sin depender de helper externo
-    if cal_mode == "Multiplicador":
-        _base = bmr * {"Alto": mult_alto, "Medio": mult_medio, "Bajo": mult_bajo}[tipo_dia]
-    else:
-        _base = bmr + {"Alto": float(extra_alto), "Medio": float(extra_medio), "Bajo": float(extra_bajo)}[tipo_dia]
-    _tdee_local = _base * (1 + adj_pct / 100.0)
-    _c_val = max(0.0, (_tdee_local - (_p_val * 4 + _f_val * 9)) / 4.0)
-
-macros_daily_df = pd.DataFrame(
-    {
-        "Macro": ["Carbohidratos", "Proteína", "Grasa"],
-        "g": [_c_val, _p_val, _f_val],
-        "kcal": [_c_val * 4, _p_val * 4, _f_val * 9],
-    }
-)
-macros_daily_df["% kcal"] = (macros_daily_df["kcal"] / macros_daily_df["kcal"].sum() * 100).round(1)
-
-col_tbl, col_chart = st.columns([1, 1])
-with col_tbl:
-    st.dataframe(macros_daily_df, use_container_width=True)
-with col_chart:
-    try:
-        pie = (
-            alt.Chart(macros_daily_df)
-            .mark_arc()
-            .encode(
-                theta=alt.Theta(field="kcal", type="quantitative"),
-                color=alt.Color(field="Macro", type="nominal"),
-                tooltip=["Macro", "g", "kcal", "% kcal"],
-            )
-            .properties(width=320, height=320)
-        )
-        st.altair_chart(pie, use_container_width=False)
-    except Exception:
-        st.bar_chart(macros_daily_df.set_index("Macro")["kcal"])
-
+    st.metric("Proteína (g/día)", f"{p_day:.0f}")
+    st.metric("Grasa (g/día)", f"{f_day:.0f}")
+    st.metric("Carbohidratos (g/día)", f"{c_day:.0f}")
 
 # =============================
 # Reparto por comida (editable)
@@ -385,13 +363,12 @@ with col_chart:
 st.markdown("### Reparto por comida")
 meal_defaults = {
     "Desayuno": {"prot": 0.10, "fat": 0.10, "carb": 0.27},
-    "Comida": {"prot": 0.39, "fat": 0.40, "carb": 0.26},
+    "Almuerzo": { "prot": 0.39, "fat": 0.40, "carb": 0.26},
     "Merienda": {"prot": 0.08, "fat": 0.06, "carb": 0.17},
     "Cena": {"prot": 0.43, "fat": 0.44, "carb": 0.30},
 }
 
 with st.expander("Editar reparto (proporción del día)"):
-    total_warn = 0.0
     for key in meal_defaults:
         st.write(f"**{key}**")
         meal_defaults[key]["prot"] = st.number_input(
@@ -403,28 +380,26 @@ with st.expander("Editar reparto (proporción del día)"):
         meal_defaults[key]["carb"] = st.number_input(
             f"Hidratos ({key})", value=float(meal_defaults[key]["carb"]), step=0.01, format="%.2f", key=f"c_{key}"
         )
-    # Aviso si las proporciones no suman cercano a 1
-    sums = {
-        m: meal_defaults[m]["prot"] + meal_defaults[m]["fat"] + meal_defaults[m]["carb"] for m in meal_defaults
-    }
-    s_total = sum(sums.values())
-    if not (0.95 <= s_total <= 1.05):
-        st.warning(
-            f"La suma de proporciones (prot+grasa+carb) entre todas las comidas es {s_total:.2f}. "
-            "Idealmente debería ser ≈ 1.0."
-        )
+
+    totals = {k: sum(meal_defaults[m][k] for m in meal_defaults) for k in ("prot", "fat", "carb")}
+    warn_msgs = []
+    for k, v in totals.items():
+        if not (0.95 <= v <= 1.05):
+            warn_msgs.append(f"suma {k} = {v:.2f}")
+    if warn_msgs:
+        st.warning("; ".join(warn_msgs) + ". Idealmente cada macro debe sumar ≈ 1.00 entre todas las comidas.")
 
 # =============================
-# Resumen de macros por comida + exportar Excel
+# Resumen de macros por comida + exportar Excel (con totales)
 # =============================
 
 st.markdown("### Resumen de macros por comida")
 
 
 def meal_targets(meal_name: str, perc: Dict[str, float]) -> Dict[str, float]:
-    p_t = a_p * perc["prot"]
-    f_t = a_f * perc["fat"]
-    c_t = a_c * perc["carb"]
+    p_t = p_day * perc["prot"]
+    f_t = f_day * perc["fat"]
+    c_t = c_day * perc["carb"]
     kcal_t = c_t * 4 + p_t * 4 + f_t * 9
     return {
         "Comida": meal_name,
@@ -434,44 +409,28 @@ def meal_targets(meal_name: str, perc: Dict[str, float]) -> Dict[str, float]:
         "Grasa (g)": round(f_t, 1),
     }
 
-meals_summary = pd.DataFrame(
-    [
-        meal_targets("Desayuno", meal_defaults["Desayuno"]),
-        meal_targets("Comida", meal_defaults["Comida"]),
-        meal_targets("Merienda", meal_defaults["Merienda"]),
-        meal_targets("Cena", meal_defaults["Cena"]),
-    ]
-)
+meals_summary = pd.DataFrame([
+    meal_targets("Desayuno", meal_defaults["Desayuno"]),
+    meal_targets("Almuerzo", meal_defaults["Almuerzo"]),
+    meal_targets("Merienda", meal_defaults["Merienda"]),
+    meal_targets("Cena", meal_defaults["Cena"]),
+])
+
 # Añadir fila TOTAL
-_total_row = {
+total_row = {
     "Comida": "TOTAL",
     "kcal": round(meals_summary["kcal"].sum(), 0),
     "Carbohidratos (g)": round(meals_summary["Carbohidratos (g)"].sum(), 1),
     "Proteína (g)": round(meals_summary["Proteína (g)"].sum(), 1),
     "Grasa (g)": round(meals_summary["Grasa (g)"].sum(), 1),
 }
-meals_summary = pd.concat([meals_summary, pd.DataFrame([_total_row])], ignore_index=True)
+meals_summary_tot = pd.concat([meals_summary, pd.DataFrame([total_row])], ignore_index=True)
 
-# Estilos: "Comida" en negrita y última fila completa en negrita
-styler = (
-    meals_summary.style
-    .format({"kcal": "{:.0f}", "Carbohidratos (g)": "{:.1f}", "Proteína (g)": "{:.1f}", "Grasa (g)": "{:.1f}"})
-    .set_properties(subset=["Comida"], **{"font-weight": "bold"})
-)
-
-def _bold_last_row(df: pd.DataFrame):
-    mask = pd.DataFrame("", index=df.index, columns=df.columns)
-    if len(df) > 0:
-        mask.loc[df.index[-1], :] = "font-weight: bold"
-    return mask
-
-styler = styler.apply(_bold_last_row, axis=None)
-st.dataframe(styler, use_container_width=True)
-
+st.dataframe(meals_summary_tot, use_container_width=True)
 
 buf_meals = BytesIO()
 with pd.ExcelWriter(buf_meals, engine="openpyxl") as writer:
-    meals_summary.to_excel(writer, index=False, sheet_name="Macros por comida")
+    meals_summary_tot.to_excel(writer, index=False, sheet_name="Macros por comida")
 buf_meals.seek(0)
 st.download_button(
     "Descargar resumen por comida (Excel)",
@@ -484,15 +443,14 @@ st.download_button(
 # Objetivos por comida seleccionada
 # =============================
 
-meal = st.selectbox("Comida", ["Desayuno", "Comida", "Merienda", "Cena"])
+st.markdown("### Comida")
+meal = st.selectbox("", ["Desayuno", "Almuerzo", "Merienda", "Cena"], label_visibility="collapsed")
 perc = meal_defaults[meal]
-p_target = a_p * perc["prot"]
-f_target = a_f * perc["fat"]
-c_target = a_c * perc["carb"]
+p_target = p_day * perc["prot"]
+f_target = f_day * perc["fat"]
+c_target = c_day * perc["carb"]
 kcal_target = c_target * 4 + p_target * 4 + f_target * 9
-st.info(
-    f"Objetivo para {meal} → {kcal_target:.0f} kcal | Prot: {p_target:.0f} g | Grasa: {f_target:.0f} g | Hidratos: {c_target:.0f} g"
-)
+st.info(f"Objetivo para {meal} → {kcal_target:.0f} kcal | Prot: {p_target:.0f} g | Grasa: {f_target:.0f} g | Hidratos: {c_target:.0f} g")
 
 # =============================
 # Creador de receta
@@ -500,57 +458,52 @@ st.info(
 
 st.markdown("### Creador de receta")
 if foods.empty:
-    st.warning(
-        "Primero sube o coloca en la carpeta un Excel de alimentos (alimentos_800_especificos.xlsx)."
-    )
+    st.warning("Primero sube o coloca en la carpeta un Excel de alimentos (alimentos_800_especificos.xlsx).")
 else:
-    fcol1, fcol2, fcol3 = st.columns(3)
-    with fcol1:
-        sel_cat = st.selectbox("Filtrar por categoría", ["(Todas)"] + sorted(foods["Categoría"].astype(str).unique().tolist()))
-    with fcol2:
-        sel_sub = st.selectbox("Filtrar por subcategoría", ["(Todas)"] + sorted(foods["Subcategoría"].astype(str).unique().tolist()))
-    with fcol3:
-        search = st.text_input("Buscar por nombre/marca contiene…", "")
-
+    # (Se ocultó el explorador de filtros + tabla)
     df_view = foods.copy()
-    if sel_cat != "(Todas)":
-        df_view = df_view[df_view["Categoría"] == sel_cat]
-    if sel_sub != "(Todas)":
-        df_view = df_view[df_view["Subcategoría"] == sel_sub]
-    if search.strip():
-        s = search.strip().lower()
-        df_view = df_view[
-            df_view["Producto"].str.lower().str.contains(s)
-            | df_view["Marca"].astype(str).str.lower().str.contains(s)
-        ]
 
-    # FIX: renombrar columnas después de seleccionar por nombres reales
-    view_cols = ["Producto", "Marca", "kcal_g", "carb_g", "prot_g", "fat_g"]
-    st.dataframe(
-        df_view[view_cols].rename(
-            columns={"kcal_g": "kcal/g", "carb_g": "carb/g", "prot_g": "prot/g", "fat_g": "fat/g"}
-        ),
-        use_container_width=True,
-        height=300,
+    # Multiselección (máximo 10)
+
+    choices = st.multiselect(
+        "Elige hasta 10 alimentos para la receta",
+        df_view["Producto"].tolist(),
     )
+    if len(choices) > 10:
+        st.warning("Has seleccionado más de 10 elementos; se usarán los 10 primeros.")
+        choices = choices[:10]
 
-    choices = st.multiselect("Elige alimentos para la receta", df_view["Producto"].tolist())
-    selected = df_view[df_view["Producto"].isin(choices)].drop_duplicates("Producto").reset_index(drop=True)
+    selected = (
+        df_view[df_view["Producto"].isin(choices)]
+        .drop_duplicates("Producto")
+        .reset_index(drop=True)
+    )
 
     if not selected.empty:
         # Editor de gramos con persistencia en session_state
         editor_key = f"editor_{meal}"
+        lock_key = f"{editor_key}_locked"
         current_products = selected["Producto"].tolist()
         prev_products = st.session_state.get(editor_key + "_products")
 
         if prev_products != current_products:
-            # inicializar o re-sincronizar
+            # inicializar o re-sincronizar (con columna de bloqueo)
             base_df = selected[["Producto", "carb_g", "prot_g", "fat_g", "kcal_g"]].copy()
-            base_df.insert(1, "Gramos (g)", 0.0)
+            old_locks = st.session_state.get(lock_key, {})
+            locks = {p: bool(old_locks.get(p, False)) for p in base_df["Producto"].tolist()}
+            base_df.insert(1, "Bloqueado", pd.Series([locks[p] for p in base_df["Producto"]]))
+            base_df.insert(2, "Gramos (g)", 0.0)
             st.session_state[editor_key] = base_df
             st.session_state[editor_key + "_products"] = current_products
+            st.session_state[lock_key] = locks
 
         editor_df = st.session_state[editor_key]
+        # Asegurar columna 'Bloqueado' existe (migración de sesiones antiguas)
+        if "Bloqueado" not in editor_df.columns:
+            locks = st.session_state.get(lock_key, {p: False for p in editor_df["Producto"].tolist()})
+            editor_df.insert(1, "Bloqueado", editor_df["Producto"].map(lambda p: bool(locks.get(p, False))))
+            st.session_state[editor_key] = editor_df
+
         st.write("Introduce gramos (puedes dejar a 0 y usar el ajuste automático):")
         editor_df = st.data_editor(
             editor_df,
@@ -559,6 +512,11 @@ else:
             hide_index=True,
             column_config={
                 "Producto": st.column_config.TextColumn(disabled=True),
+                "Bloqueado": st.column_config.CheckboxColumn(
+                    "Bloquear 🔒",
+                    help="Si está marcado, este ingrediente no se ajustará en el ajuste automático.",
+                    default=False,
+                ),
                 "carb_g": st.column_config.NumberColumn("carb/g", help="Carbohidratos por gramo", disabled=True),
                 "prot_g": st.column_config.NumberColumn("prot/g", help="Proteínas por gramo", disabled=True),
                 "fat_g": st.column_config.NumberColumn("fat/g", help="Grasas por gramo", disabled=True),
@@ -566,17 +524,17 @@ else:
                 "Gramos (g)": st.column_config.NumberColumn(step=5.0, min_value=0.0),
             },
         )
-        # Guardar edición
         st.session_state[editor_key] = editor_df
+        # Sincronizar locks desde la tabla (auto-desbloquear si gramos == 0)
+        locks = st.session_state.get(lock_key, {})
+        for _, r in editor_df.iterrows():
+            p = r["Producto"]
+            g = float(r["Gramos (g)"]) if pd.notna(r["Gramos (g)"]) else 0.0
+            checked = bool(r.get("Bloqueado", False))
+            locks[p] = False if g == 0 else checked
+        st.session_state[lock_key] = locks
 
-        if st.button("Ajustar gramos automáticamente para cuadrar macros"):
-            A = editor_df[["kcal_g", "carb_g", "prot_g", "fat_g"]].to_numpy().T
-            b = np.array([kcal_target, c_target, p_target, f_target], dtype=float)
-            x = nnls_iterative(A, b, max_iter=50)
-            editor_df.loc[:, "Gramos (g)"] = x
-            st.session_state[editor_key] = editor_df
-            st.success("Gramos ajustados.")
-
+        # Cálculo de totales actuales
         grams = editor_df["Gramos (g)"].to_numpy()
         totals = editor_df[["kcal_g", "carb_g", "prot_g", "fat_g"]].multiply(grams, axis=0).sum()
         kcal_tot = float(totals["kcal_g"]) if not np.isnan(totals["kcal_g"]) else 0.0
@@ -589,6 +547,76 @@ else:
         colB.metric("Carbohidratos (g)", f"{carb_tot:.0f}", delta=f"{carb_tot - c_target:+.0f}")
         colC.metric("Proteínas (g)", f"{prot_tot:.0f}", delta=f"{prot_tot - p_target:+.0f}")
         colD.metric("Grasas (g)", f"{fat_tot:.0f}", delta=f"{fat_tot - f_target:+.0f}")
+
+        # Ajuste de gramos
+        st.markdown("**Ajuste de gramos**")
+        btn_col1, btn_col2 = st.columns([1, 2])
+
+        # 1) Ajustar TODOS los ingredientes (cuadrar macros totales)
+        with btn_col1:
+            if st.button("Ajustar TODOS (cuadrar macros)"):
+                A_full = editor_df[["carb_g", "prot_g", "fat_g"]].to_numpy().T  # 3 x N
+                b = np.array([c_target, p_target, f_target], dtype=float)
+                products = editor_df["Producto"].tolist()
+                grams_now = editor_df["Gramos (g)"].to_numpy().astype(float)
+                locks = st.session_state.get(lock_key, {p: False for p in products})
+                locked_idx = [i for i, p in enumerate(products) if locks.get(p, False)]
+                unlocked_idx = [i for i, p in enumerate(products) if not locks.get(p, False)]
+
+                if len(unlocked_idx) == 0:
+                    st.info("Todos los ingredientes están bloqueados (editados manualmente). Pon alguno a 0 para desbloquearlo y poder ajustarlo.")
+                else:
+                    # Restar contribución de los bloqueados al objetivo
+                    if len(locked_idx) > 0:
+                        A_lock = A_full[:, locked_idx]
+                        g_lock = grams_now[locked_idx]
+                        b_res = b - A_lock @ g_lock
+                    else:
+                        b_res = b
+                    A_un = A_full[:, unlocked_idx]
+                    x_un = nnls_iterative(A_un, b_res, max_iter=50)
+                    new_grams = grams_now.copy()
+                    new_grams[unlocked_idx] = x_un
+                    editor_df.loc[:, "Gramos (g)"] = new_grams
+                    st.session_state[editor_key] = editor_df
+                    st.session_state[editor_key + "_programmatic"] = True
+                    st.success("Gramos ajustados para los ingredientes desbloqueados.")
+                    _safe_rerun()
+
+        # 2) Ajustar SOLO un ingrediente seleccionado por el usuario
+        with btn_col2:
+            ing_choice = st.selectbox(
+                "Ingrediente a ajustar (solo este)", editor_df["Producto"].tolist(), key=f"single_sel_{meal}"
+            )
+            if st.button("Ajustar SOLO este ingrediente"):
+                # déficits actuales respecto al objetivo
+                deficits = np.array([
+                    c_target - carb_tot,
+                    p_target - prot_tot,
+                    f_target - fat_tot,
+                ], dtype=float)
+                v = (
+                    editor_df.loc[editor_df["Producto"] == ing_choice, ["carb_g", "prot_g", "fat_g"]]
+                    .to_numpy()
+                    .ravel()
+                )
+                denom = float(np.dot(v, v))
+                if denom <= 0 or not np.isfinite(denom):
+                    st.warning("No se puede ajustar con este ingrediente (densidades no válidas).")
+                else:
+                    # mejor ajuste LS en una dimensión (puede ser + o -). No permitimos gramos negativos.
+                    g_delta = float(np.dot(v, deficits)) / denom
+                    current_g = float(
+                        editor_df.loc[editor_df["Producto"] == ing_choice, "Gramos (g)"].iloc[0]
+                    )
+                    new_val = max(0.0, current_g + g_delta)
+                    editor_df.loc[editor_df["Producto"] == ing_choice, "Gramos (g)"] = new_val
+                    st.session_state[editor_key] = editor_df
+                    st.session_state[editor_key + "_programmatic"] = True
+                    msg = "aumentados" if g_delta >= 0 else "reducidos"
+                    st.success(
+                        f"Gramos {msg} en '{ing_choice}' en {abs(g_delta):.0f} g (nuevo total: {new_val:.0f} g)."
+                    )
 
         # Detalle actual de la receta
         df_curr = editor_df[["Producto", "Gramos (g)"]].copy()
@@ -607,32 +635,25 @@ else:
             st.session_state["recipes"] = []
 
         if st.button("Guardar receta"):
-            st.session_state["recipes"].append(
-                {
-                    "nombre": recipe_name or f"Receta {len(st.session_state['recipes']) + 1}",
-                    "tipo_dia": tipo_dia,
-                    "comida": meal,
-                    "objetivo": {
-                        "kcal": float(kcal_target),
-                        "carb": float(c_target),
-                        "prot": float(p_target),
-                        "fat": float(f_target),
-                    },
-                    "resultado": {
-                        "kcal": kcal_tot,
-                        "carb": carb_tot,
-                        "prot": prot_tot,
-                        "fat": fat_tot,
-                    },
-                    "ingredientes": [
-                        {
-                            "producto": editor_df.loc[i, "Producto"],
-                            "gramos": float(editor_df.loc[i, "Gramos (g)"]),
-                        }
-                        for i in range(len(editor_df))
-                    ],
-                }
-            )
+            grams = editor_df["Gramos (g)"]
+            totals = editor_df[["kcal_g", "carb_g", "prot_g", "fat_g"]].multiply(grams, axis=0).sum()
+            r = {
+                "nombre": recipe_name or f"Receta {len(st.session_state['recipes']) + 1}",
+                "tipo_dia": tipo_dia,
+                "comida": meal,
+                "objetivo": {"kcal": float(kcal_target), "carb": float(c_target), "prot": float(p_target), "fat": float(f_target)},
+                "resultado": {
+                    "kcal": float(totals["kcal_g"]),
+                    "carb": float(totals["carb_g"]),
+                    "prot": float(totals["prot_g"]),
+                    "fat": float(totals["fat_g"]),
+                },
+                "ingredientes": [
+                    {"producto": editor_df.loc[i, "Producto"], "gramos": float(editor_df.loc[i, "Gramos (g)"])}
+                    for i in range(len(editor_df))
+                ],
+            }
+            st.session_state["recipes"].append(r)
             st.success("Receta guardada en la sesión.")
 
 # =============================
@@ -654,14 +675,10 @@ else:
                 col1, col2 = st.columns(2)
                 with col1:
                     st.write("**Objetivo**")
-                    st.write(
-                        f"{r['objetivo']['kcal']:.0f} kcal | C:{r['objetivo']['carb']:.0f} g · P:{r['objetivo']['prot']:.0f} g · G:{r['objetivo']['fat']:.0f} g"
-                    )
+                    st.write(f"{r['objetivo']['kcal']:.0f} kcal | C:{r['objetivo']['carb']:.0f} g · P:{r['objetivo']['prot']:.0f} g · G:{r['objetivo']['fat']:.0f} g")
                 with col2:
                     st.write("**Resultado**")
-                    st.write(
-                        f"{r['resultado']['kcal']:.0f} kcal | C:{r['resultado']['carb']:.0f} g · P:{r['resultado']['prot']:.0f} g · G:{r['resultado']['fat']:.0f} g"
-                    )
+                    st.write(f"{r['resultado']['kcal']:.0f} kcal | C:{r['resultado']['carb']:.0f} g · P:{r['resultado']['prot']:.0f} g · G:{r['resultado']['fat']:.0f} g")
 
                 # Detalle por ingrediente
                 ing_rows = []
@@ -675,16 +692,14 @@ else:
                         fat = float(row["fat_g"].iloc[0]) * g
                     else:
                         kcal = carb = prot = fat = np.nan
-                    ing_rows.append(
-                        {
-                            "Producto": ing["producto"],
-                            "Gramos (g)": round(g, 1),
-                            "Carbohidratos (g)": None if pd.isna(carb) else round(carb, 1),
-                            "Proteína (g)": None if pd.isna(prot) else round(prot, 1),
-                            "Grasa (g)": None if pd.isna(fat) else round(fat, 1),
-                            "kcal": None if pd.isna(kcal) else round(kcal, 0),
-                        }
-                    )
+                    ing_rows.append({
+                        "Producto": ing["producto"],
+                        "Gramos (g)": round(g, 1),
+                        "Carbohidratos (g)": None if pd.isna(carb) else round(carb, 1),
+                        "Proteína (g)": None if pd.isna(prot) else round(prot, 1),
+                        "Grasa (g)": None if pd.isna(fat) else round(fat, 1),
+                        "kcal": None if pd.isna(kcal) else round(kcal, 0),
+                    })
                 df_ing = pd.DataFrame(ing_rows)
                 st.dataframe(df_ing, hide_index=True, use_container_width=True)
 
@@ -711,27 +726,23 @@ else:
     st.markdown("\n#### Exportar todas las recetas")
     buf_all = BytesIO()
     with pd.ExcelWriter(buf_all, engine="openpyxl") as writer:
-        # Hoja resumen
         summary_rows = []
         for r in recipes:
-            summary_rows.append(
-                {
-                    "Nombre": r["nombre"],
-                    "Tipo de día": r["tipo_dia"],
-                    "Comida": r["comida"],
-                    "kcal_obj": r["objetivo"]["kcal"],
-                    "carb_obj": r["objetivo"]["carb"],
-                    "prot_obj": r["objetivo"]["prot"],
-                    "fat_obj": r["objetivo"]["fat"],
-                    "kcal_res": r["resultado"]["kcal"],
-                    "carb_res": r["resultado"]["carb"],
-                    "prot_res": r["resultado"]["prot"],
-                    "fat_res": r["resultado"]["fat"],
-                }
-            )
+            summary_rows.append({
+                "Nombre": r["nombre"],
+                "Tipo de día": r["tipo_dia"],
+                "Comida": r["comida"],
+                "kcal_obj": r["objetivo"]["kcal"],
+                "carb_obj": r["objetivo"]["carb"],
+                "prot_obj": r["objetivo"]["prot"],
+                "fat_obj": r["objetivo"]["fat"],
+                "kcal_res": r["resultado"]["kcal"],
+                "carb_res": r["resultado"]["carb"],
+                "prot_res": r["resultado"]["prot"],
+                "fat_res": r["resultado"]["fat"],
+            })
         pd.DataFrame(summary_rows).to_excel(writer, index=False, sheet_name="Resumen")
 
-        # Hojas por receta
         for r in recipes:
             ing_rows = []
             for ing in r["ingredientes"]:
@@ -744,16 +755,14 @@ else:
                     fat = float(row["fat_g"].iloc[0]) * g
                 else:
                     kcal = carb = prot = fat = np.nan
-                ing_rows.append(
-                    {
-                        "Producto": ing["producto"],
-                        "Gramos (g)": round(g, 1),
-                        "Carbohidratos (g)": None if pd.isna(carb) else round(carb, 1),
-                        "Proteína (g)": None if pd.isna(prot) else round(prot, 1),
-                        "Grasa (g)": None if pd.isna(fat) else round(fat, 1),
-                        "kcal": None if pd.isna(kcal) else round(kcal, 0),
-                    }
-                )
+                ing_rows.append({
+                    "Producto": ing["producto"],
+                    "Gramos (g)": round(g, 1),
+                    "Carbohidratos (g)": None if pd.isna(carb) else round(carb, 1),
+                    "Proteína (g)": None if pd.isna(prot) else round(prot, 1),
+                    "Grasa (g)": None if pd.isna(fat) else round(fat, 1),
+                    "kcal": None if pd.isna(kcal) else round(kcal, 0),
+                })
             pd.DataFrame(ing_rows).to_excel(writer, index=False, sheet_name=r["nombre"][:31])
 
     buf_all.seek(0)

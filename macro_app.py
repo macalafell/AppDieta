@@ -22,13 +22,29 @@ def _safe_rerun():
 # =============================
 st.set_page_config(page_title="APP DIETA · Planificador de platos", layout="wide")
 
-# === Estilos globales (títulos #BB4430) ===
+# === Estilos globales (títulos #BB4430) + tooltip CSS ===
 st.markdown("""
 <style>
   h1, h2, h3 { color: #BB4430 !important; }
   /* Evitar solapes en encabezado del expander */
   div.streamlit-expanderHeader { white-space: normal !important; overflow: hidden; }
   div.streamlit-expanderHeader p { margin: 0 !important; }
+
+  /* Tooltip */
+  .tooltip-wrap{position:relative;display:inline-block;cursor:help;}
+  .tooltip-wrap .tooltip-content{
+    visibility:hidden;opacity:0;transition:opacity .2s ease;
+    position:absolute;left:0;top:120%;z-index:10000;
+    background:rgba(0,0,0,0.9);color:#fff;border:1px solid rgba(255,255,255,.1);
+    border-radius:8px;padding:10px 12px;width:360px;max-width:80vw;
+    box-shadow:0 6px 24px rgba(0,0,0,.3);
+  }
+  .tooltip-wrap:hover .tooltip-content{visibility:visible;opacity:1;}
+  .tooltip-content table{width:100%;border-collapse:collapse;font-size:0.85rem;}
+  .tooltip-content th,.tooltip-content td{
+    padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.12);text-align:left;
+  }
+  .tooltip-content th:nth-child(2),.tooltip-content td:nth-child(2){text-align:center;width:90px;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -213,7 +229,7 @@ def load_foods(uploaded) -> pd.DataFrame:
 
 def nnls_iterative(A: np.ndarray, b: np.ndarray, max_iter: int = 50) -> np.ndarray:
     """Resuelve min ||A x - b|| con x>=0 (active set simple) y escala de columnas.
-    - A: matriz (m x n) con densidades por gramo (p.ej., filas=carb/prot/fat; columnas=alimentos)
+    - A: matriz (m x n) con densidades por gramo (filas=carb/prot/fat; columnas=alimentos)
     - b: vector objetivo (m,)
     Devuelve x (n,) en gramos por alimento.
     """
@@ -256,7 +272,34 @@ height = st.sidebar.number_input("Altura (cm)", min_value=120.0, max_value=230.0
 age = st.sidebar.number_input("Edad (años)", min_value=14, max_value=100, value=35, step=1)
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("Objetivo calórico por tipo de día")
+
+# Título con tooltip (reemplaza subheader)
+st.sidebar.markdown("""
+<div class="tooltip-wrap">
+  <h3 style="margin:0">Objetivo calórico por tipo de día ⓘ</h3>
+  <div class="tooltip-content">
+    <strong>Activity multipliers:</strong>
+    <table>
+      <thead>
+        <tr><th>Nivel de actividad</th><th>Multiplicador</th><th>Descripción</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>Sedentario</strong></td><td>1.2</td>
+            <td>Poco o ningún ejercicio; trabajo de escritorio.</td></tr>
+        <tr><td><strong>Ligeramente activo</strong></td><td>1.375</td>
+            <td>Ejercicio ligero 1–3 días/sem (caminar, yoga, ciclismo suave).</td></tr>
+        <tr><td><strong>Moderadamente activo</strong></td><td>1.55</td>
+            <td>Ejercicio moderado 3–5 días/sem (gimnasio, correr, deportes).</td></tr>
+        <tr><td><strong>Muy activo</strong></td><td>1.725</td>
+            <td>Ejercicio intenso 6–7 días/sem o trabajo físicamente exigente.</td></tr>
+        <tr><td><strong>Extra activo</strong></td><td>1.9</td>
+            <td>Entrenamiento muy intenso (2x/día) o trabajo extremadamente físico.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
 cal_mode = st.sidebar.radio("Modo", ["Multiplicador", "Kcal manual"], horizontal=True)
 
 if cal_mode == "Multiplicador":
@@ -321,7 +364,6 @@ st.sidebar.number_input("Carbohidratos (g/kg) - MEDIO", value=carbs_medio_gkg, s
 st.sidebar.caption("Día BAJO")
 st.sidebar.number_input("Carbohidratos (g/kg) - BAJO", value=carbs_bajo_gkg, step=0.01, format="%.2f", disabled=True, key="c_bajo_gkg_ro")
 
-# Tabla integrada de g/kg por tipo de día
 st.sidebar.markdown("---")
 uploaded = st.sidebar.file_uploader("Sube tu Excel de alimentos (opcional)", type=["xlsx"])
 
@@ -388,7 +430,6 @@ with col3:
                 color=alt.Color(
                     field="Macro",
                     type="nominal",
-                    # Colores fijos solicitados
                     scale=alt.Scale(
                         domain=["Carbohidratos", "Proteína", "Grasa"],
                         range=["#7EBDC2", "#F3DFA2", "#EFE6DD"],
@@ -402,6 +443,7 @@ with col3:
     except Exception:
         st.bar_chart(macros_daily_df.set_index("Macro")["kcal"])
 
+
 # =============================
 # Reparto por comida (editable)
 # =============================
@@ -409,7 +451,7 @@ with col3:
 st.markdown("### Reparto por comida")
 meal_defaults = {
     "Desayuno": {"prot": 0.10, "fat": 0.10, "carb": 0.27},
-    "Almuerzo": { "prot": 0.39, "fat": 0.40, "carb": 0.26},
+    "Almuerzo": {"prot": 0.39, "fat": 0.40, "carb": 0.26},
     "Merienda": {"prot": 0.08, "fat": 0.06, "carb": 0.17},
     "Cena": {"prot": 0.43, "fat": 0.44, "carb": 0.30},
 }
@@ -508,12 +550,11 @@ def render_meals_table_html(df: pd.DataFrame) -> str:
     html.append("</tr></thead>")
     # body
     html.append("<tbody>")
-    for i, row in df.iterrows():
+    for _, row in df.iterrows():
         html.append("<tr>")
-        for j, c in enumerate(cols):
+        for c in cols:
             val = row[c]
             if isinstance(val, float):
-                # formateo simple
                 if c == "kcal":
                     cell = f"{val:.0f}"
                 else:
@@ -563,23 +604,15 @@ st.markdown("### Creador de receta")
 if foods.empty:
     st.warning("Primero sube o coloca en la carpeta un Excel de alimentos (alimentos_800_especificos.xlsx).")
 else:
-    # (Se ocultó el explorador de filtros + tabla)
     df_view = foods.copy()
 
     # Multiselección (máximo 10)
-    choices = st.multiselect(
-        "Elige hasta 10 alimentos para la receta",
-        df_view["Producto"].tolist(),
-    )
+    choices = st.multiselect("Elige hasta 10 alimentos para la receta", df_view["Producto"].tolist())
     if len(choices) > 10:
         st.warning("Has seleccionado más de 10 elementos; se usarán los 10 primeros.")
         choices = choices[:10]
 
-    selected = (
-        df_view[df_view["Producto"].isin(choices)]
-        .drop_duplicates("Producto")
-        .reset_index(drop=True)
-    )
+    selected = df_view[df_view["Producto"].isin(choices)].drop_duplicates("Producto").reset_index(drop=True)
 
     if not selected.empty:
         # Editor de gramos con persistencia en session_state
@@ -863,9 +896,13 @@ else:
                     "Carbohidratos (g)": None if pd.isna(carb) else round(carb, 1),
                     "Proteína (g)": None if pd.isna(prot) else round(prot, 1),
                     "Grasa (g)": None if pd.isna(fat) else round(fat, 1),
+                    "kcal": None
                     "kcal": None if pd.isna(kcal) else round(kcal, 0),
                 })
+            # fin bucle ingredientes
             pd.DataFrame(ing_rows).to_excel(writer, index=False, sheet_name=r["nombre"][:31])
+        # fin bucle recetas
+    # fin with ExcelWriter
 
     buf_all.seek(0)
     st.download_button(

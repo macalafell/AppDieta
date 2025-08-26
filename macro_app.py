@@ -6,6 +6,7 @@ import re
 import unicodedata
 from io import BytesIO
 from typing import Dict, List, Optional
+import altair as alt
 
 def _safe_rerun():
     """Compatibilidad Streamlit: usa st.rerun() si existe; si no, st.experimental_rerun()."""
@@ -357,6 +358,36 @@ with right:
     st.metric("Carbohidratos (g/día)", f"{c_day:.0f}")
 
 # =============================
+# Gráfico: Reparto de macronutrientes diarios
+# =============================
+
+st.markdown("### Reparto de macronutrientes diarios")
+macros_daily_df = pd.DataFrame(
+    {
+        "Macro": ["Carbohidratos", "Proteína", "Grasa"],
+        "Gramos": [c_day, p_day, f_day],
+        "kcal": [c_day * 4, p_day * 4, f_day * 9],
+    }
+)
+macros_daily_df["% kcal"] = (macros_daily_df["kcal"] / macros_daily_df["kcal"].sum() * 100).round(1)
+
+try:
+    pie = (
+        alt.Chart(macros_daily_df)
+        .mark_arc()
+        .encode(
+            theta=alt.Theta(field="kcal", type="quantitative"),
+            color=alt.Color(field="Macro", type="nominal"),
+            tooltip=["Macro", "Gramos", "kcal", "% kcal"],
+        )
+        .properties(width=350, height=350)
+    )
+    st.altair_chart(pie, use_container_width=False)
+except Exception:
+    # Fallback simple si Altair no está disponible
+    st.bar_chart(macros_daily_df.set_index("Macro")["kcal"])
+
+# =============================
 # Reparto por comida (editable)
 # =============================
 
@@ -464,7 +495,6 @@ else:
     df_view = foods.copy()
 
     # Multiselección (máximo 10)
-
     choices = st.multiselect(
         "Elige hasta 10 alimentos para la receta",
         df_view["Producto"].tolist(),

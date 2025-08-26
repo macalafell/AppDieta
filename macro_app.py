@@ -6,7 +6,7 @@ import re
 import unicodedata
 from io import BytesIO
 from typing import Dict, List, Optional, Tuple
-import matplotlib.pyplot as plt
+import altair as alt
 
 # =============================
 # Configuración de la página
@@ -336,8 +336,8 @@ st.markdown("### Resumen de macros diarios")
 macros_daily_df = pd.DataFrame(
     {
         "Macro": ["Carbohidratos", "Proteína", "Grasa"],
-        "g": [a_c, a_p, a_f],
-        "kcal": [a_c * 4, a_p * 4, a_f * 9],
+        "g": [c_day, p_day, f_day],
+        "kcal": [c_day * 4, p_day * 4, f_day * 9],
     }
 )
 macros_daily_df["% kcal"] = (macros_daily_df["kcal"] / macros_daily_df["kcal"].sum() * 100).round(1)
@@ -346,10 +346,18 @@ col_tbl, col_chart = st.columns([1, 1])
 with col_tbl:
     st.dataframe(macros_daily_df, use_container_width=True)
 with col_chart:
-    fig, ax = plt.subplots()
-    ax.pie(macros_daily_df["kcal"], labels=macros_daily_df["Macro"], autopct="%1.0f%%", startangle=90)
-    ax.axis("equal")
-    st.pyplot(fig)
+    try:
+        pie = (
+            alt.Chart(macros_daily_df)
+            .mark_arc()
+            .encode(theta=alt.Theta(field="kcal", type="quantitative"),
+                    color=alt.Color(field="Macro", type="nominal"),
+                    tooltip=["Macro", "g", "kcal", "% kcal"])
+            .properties(width=320, height=320)
+        )
+        st.altair_chart(pie, use_container_width=False)
+    except Exception:
+        st.bar_chart(macros_daily_df.set_index("Macro")["kcal"])
 
 
 # =============================

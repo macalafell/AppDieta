@@ -30,6 +30,34 @@ st.markdown("""
 """, unsafe_allow_html=True)
 st.title("APP Creador Recetas")
 
+# === Estilos adicionales: Tablas minimalistas con la paleta ===
+st.markdown(f"""
+<style>
+  /* ===== Tablas minimalistas (st.dataframe / st.data_editor) ===== */
+  .stDataFrame, .stDataEditor {{
+    background: transparent !important;
+  }}
+  .stDataFrame table, .stDataEditor table {{
+    border-collapse: collapse !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    font-size: 0.95rem;
+  }}
+  .stDataFrame thead tr th, .stDataEditor thead tr th {{
+    background: {PALETTE['vanilla']} !important;
+    color: {PALETTE['raisin_black']} !important;
+    font-weight: 600 !important;
+    border-bottom: 2px solid {PALETTE['raisin_black']}22 !important;
+  }}
+  .stDataFrame tbody tr td, .stDataEditor tbody tr td {{
+    border-bottom: 1px solid {PALETTE['raisin_black']}1f !important;
+  }}
+  .stDataFrame tbody tr:hover td, .stDataEditor tbody tr:hover td {{
+    background: {PALETTE['verdigris']}22 !important;
+  }}
+</style>
+""", unsafe_allow_html=True)
+
 # =============================
 # Utilidades generales
 # =============================

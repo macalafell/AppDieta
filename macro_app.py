@@ -353,51 +353,54 @@ f_day = {"Alto": g_alto, "Medio": g_medio, "Bajo": g_bajo}[tipo_dia] * weight
 kcal_from_p_f = p_day * 4 + f_day * 9
 c_day = max(0.0, (tdee - kcal_from_p_f) / 4.0)
 
-left, right = st.columns([1, 1])
-with left:
+# --- Fila superior: métricas y gráfico alineados ---
+col1, col2, col3 = st.columns([1, 1, 1.2])
+
+with col1:
     st.metric("BMR (kcal/día)", f"{bmr:.0f}")
     st.metric("TDEE (kcal/día)", f"{tdee:.0f}")
-with right:
+
+with col2:
     st.metric("Proteína (g/día)", f"{p_day:.0f}")
     st.metric("Grasa (g/día)", f"{f_day:.0f}")
     st.metric("Carbohidratos (g/día)", f"{c_day:.0f}")
 
-# =============================
-# Gráfico: Reparto de macronutrientes diarios
-# =============================
+with col3:
+    st.markdown("### Reparto de macronutrientes diarios")
 
-st.markdown("### Reparto de macronutrientes diarios")
-macros_daily_df = pd.DataFrame(
-    {
-        "Macro": ["Carbohidratos", "Proteína", "Grasa"],
-        "Gramos": [c_day, p_day, f_day],
-        "kcal": [c_day * 4, p_day * 4, f_day * 9],
-    }
-)
-macros_daily_df["% kcal"] = (macros_daily_df["kcal"] / macros_daily_df["kcal"].sum() * 100).round(1)
-
-try:
-    pie = (
-        alt.Chart(macros_daily_df)
-        .mark_arc()
-        .encode(
-            theta=alt.Theta(field="kcal", type="quantitative"),
-            color=alt.Color(
-                field="Macro",
-                type="nominal",
-                # Colores pedidos: 7EBDC2, F3DFA2, EFE6DD
-                scale=alt.Scale(
-                    domain=["Carbohidratos", "Proteína", "Grasa"],
-                    range=["#7EBDC2", "#F3DFA2", "#EFE6DD"],
-                ),
-            ),
-            tooltip=["Macro", "Gramos", "kcal", "% kcal"],
-        )
-        .properties(width=360, height=360)
+    macros_daily_df = pd.DataFrame(
+        {
+            "Macro": ["Carbohidratos", "Proteína", "Grasa"],
+            "Gramos": [c_day, p_day, f_day],
+            "kcal": [c_day * 4, p_day * 4, f_day * 9],
+        }
     )
-    st.altair_chart(pie, use_container_width=False)
-except Exception:
-    st.bar_chart(macros_daily_df.set_index("Macro")["kcal"])
+    macros_daily_df["% kcal"] = (
+        macros_daily_df["kcal"] / macros_daily_df["kcal"].sum() * 100
+    ).round(1)
+
+    try:
+        pie = (
+            alt.Chart(macros_daily_df)
+            .mark_arc()
+            .encode(
+                theta=alt.Theta(field="kcal", type="quantitative"),
+                color=alt.Color(
+                    field="Macro",
+                    type="nominal",
+                    # Colores fijos solicitados
+                    scale=alt.Scale(
+                        domain=["Carbohidratos", "Proteína", "Grasa"],
+                        range=["#7EBDC2", "#F3DFA2", "#EFE6DD"],
+                    ),
+                ),
+                tooltip=["Macro", "Gramos", "kcal", "% kcal"],
+            )
+            .properties(width=360, height=360)
+        )
+        st.altair_chart(pie, use_container_width=True)
+    except Exception:
+        st.bar_chart(macros_daily_df.set_index("Macro")["kcal"])
 
 # =============================
 # Reparto por comida (editable)

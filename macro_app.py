@@ -333,11 +333,22 @@ with right:
 
 # === Resumen de macros diarios (tabla + gráfico tarta) ===
 st.markdown("### Resumen de macros diarios")
+# Valores robustos aunque el bloque anterior no haya definido aún c_day/p_day/f_day
+try:
+    _c_val = float(c_day)
+    _p_val = float(p_day)
+    _f_val = float(f_day)
+except Exception:
+    _p_val = {"Alto": p_alto, "Medio": p_medio, "Bajo": p_bajo}[tipo_dia] * weight
+    _f_val = {"Alto": g_alto, "Medio": g_medio, "Bajo": g_bajo}[tipo_dia] * weight
+    _tdee_local = _tdee_by_method(tipo_dia, adj_pct)
+    _c_val = max(0.0, (_tdee_local - (_p_val * 4 + _f_val * 9)) / 4.0)
+
 macros_daily_df = pd.DataFrame(
     {
         "Macro": ["Carbohidratos", "Proteína", "Grasa"],
-        "g": [c_day, p_day, f_day],
-        "kcal": [c_day * 4, p_day * 4, f_day * 9],
+        "g": [_c_val, _p_val, _f_val],
+        "kcal": [_c_val * 4, _p_val * 4, _f_val * 9],
     }
 )
 macros_daily_df["% kcal"] = (macros_daily_df["kcal"] / macros_daily_df["kcal"].sum() * 100).round(1)
@@ -350,9 +361,11 @@ with col_chart:
         pie = (
             alt.Chart(macros_daily_df)
             .mark_arc()
-            .encode(theta=alt.Theta(field="kcal", type="quantitative"),
-                    color=alt.Color(field="Macro", type="nominal"),
-                    tooltip=["Macro", "g", "kcal", "% kcal"])
+            .encode(
+                theta=alt.Theta(field="kcal", type="quantitative"),
+                color=alt.Color(field="Macro", type="nominal"),
+                tooltip=["Macro", "g", "kcal", "% kcal"],
+            )
             .properties(width=320, height=320)
         )
         st.altair_chart(pie, use_container_width=False)

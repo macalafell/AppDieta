@@ -896,7 +896,6 @@ else:
                     "Carbohidratos (g)": None if pd.isna(carb) else round(carb, 1),
                     "Proteína (g)": None if pd.isna(prot) else round(prot, 1),
                     "Grasa (g)": None if pd.isna(fat) else round(fat, 1),
-                    "kcal": None
                     "kcal": None if pd.isna(kcal) else round(kcal, 0),
                 })
             # fin bucle ingredientes

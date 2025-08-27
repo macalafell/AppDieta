@@ -267,7 +267,7 @@ def nnls_iterative(A: np.ndarray, b: np.ndarray, max_iter: int = 50) -> np.ndarr
 # =============================
 
 st.sidebar.header("Profile & parameters")
-sex = st.sidebar.selectbox("Sex", ["Male", "Female"])  # language-agnostic parser supports both
+sex = st.sidebar.selectbox("Sex", ["Male", "Female"])
 weight = st.sidebar.number_input("Weight (kg)", min_value=30.0, max_value=300.0, value=65.0, step=0.5)
 height = st.sidebar.number_input("Height (cm)", min_value=120.0, max_value=230.0, value=178.0, step=0.5)
 age = st.sidebar.number_input("Age (years)", min_value=14, max_value=100, value=35, step=1)
@@ -640,21 +640,20 @@ else:
         current_products = selected["Producto"].tolist()
         prev_products = st.session_state.get(editor_key + "_products")
 
-       if prev_products != current_products:
-    base_df = selected[["Producto", "carb_g", "prot_g", "fat_g", "kcal_g"]].copy()
-    old_locks = st.session_state.get(lock_key, {})
-    # mapa de bloqueos existentes
-    locks = {p: bool(old_locks.get(p, False)) for p in base_df["Producto"].tolist()}
-    # columna Locked alineada al índice del DataFrame
-    base_df.insert(
-        1,
-        "Locked",
-        pd.Series([locks.get(p, False) for p in base_df["Producto"].tolist()], index=base_df.index)
-    )
-    base_df.insert(2, "Grams (g)", 0.0)
-    st.session_state[editor_key] = base_df
-    st.session_state[editor_key + "_products"] = current_products
-    st.session_state[lock_key] = locks
+        if prev_products != current_products:
+            base_df = selected[["Producto", "carb_g", "prot_g", "fat_g", "kcal_g"]].copy()
+            old_locks = st.session_state.get(lock_key, {})
+            locks = {p: bool(old_locks.get(p, False)) for p in base_df["Producto"].tolist()}
+            # FIX: close brackets properly and align with index
+            base_df.insert(
+                1,
+                "Locked",
+                pd.Series([locks.get(p, False) for p in base_df["Producto"].tolist()], index=base_df.index)
+            )
+            base_df.insert(2, "Grams (g)", 0.0)
+            st.session_state[editor_key] = base_df
+            st.session_state[editor_key + "_products"] = current_products
+            st.session_state[lock_key] = locks
 
         editor_df = st.session_state[editor_key]
         if "Locked" not in editor_df.columns:

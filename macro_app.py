@@ -267,8 +267,8 @@ def nnls_iterative(A: np.ndarray, b: np.ndarray, max_iter: int = 50) -> np.ndarr
 # =============================
 
 st.sidebar.header("Profile & parameters")
-sex = st.sidebar.selectbox("Sex", ["Male", "Female"])
-weight = st.sidebar.number_input("Weight (kg)", min_value=30.0, max_value=300.0, value=75.0, step=0.5)
+sex = st.sidebar.selectbox("Sex", ["Male", "Female"])  # language-agnostic parser supports both
+weight = st.sidebar.number_input("Weight (kg)", min_value=30.0, max_value=300.0, value=65.0, step=0.5)
 height = st.sidebar.number_input("Height (cm)", min_value=120.0, max_value=230.0, value=178.0, step=0.5)
 age = st.sidebar.number_input("Age (years)", min_value=14, max_value=100, value=35, step=1)
 
@@ -328,7 +328,7 @@ p_low = st.sidebar.number_input("Protein (g/kg) - LOW", value=2.0, step=0.1)
 g_low = st.sidebar.number_input("Fat (g/kg) - LOW", value=1.5, step=0.1)
 
 st.sidebar.markdown("---")
-adj_pct = st.sidebar.slider("Total calories adjustment (%)", min_value=-25, max_value=25, value=0, step=1)
+adj_pct = st.sidebar.slider("Total calories adjustment (%)", min_value=-25, max_value=25, value=-10, step=1)
 
 # Auto-calculated carbohydrates in g/kg
 st.sidebar.markdown("---")
@@ -597,11 +597,11 @@ st.download_button(
 st.markdown("### Meal")
 meal = st.selectbox("", ["Breakfast", "Lunch", "Snack", "Dinner"], label_visibility="collapsed")
 perc = meal_defaults[meal]
-p_target = p_day * perc["prot"]
-f_target = f_day * perc["fat"]
-c_target = c_day * perc["carb"]
-kcal_target = c_target * 4 + p_target * 4 + f_target * 9
-st.info(f"Target for {meal} → {kcal_target:.0f} kcal | Protein: {p_target:.0f} g | Fat: {f_target:.0f} g | Carbs: {c_target:.0f} g")
+pt = p_day * perc["prot"]
+ft = f_day * perc["fat"]
+ct = c_day * perc["carb"]
+kcal_target = ct * 4 + pt * 4 + ft * 9
+st.info(f"Target for {meal} → {kcal_target:.0f} kcal | Protein: {pt:.0f} g | Fat: {ft:.0f} g | Carbs: {ct:.0f} g")
 
 # =============================
 # Recipe builder
@@ -630,7 +630,7 @@ else:
         st.warning("You selected more than 10 items; only the first 10 will be used.")
         choices_idx = choices_idx[:10]
 
-    # Keep one row per product name to avoid later ambiguity when looking up by 'Producto'
+    # Keep one row per product name to avoid ambiguity when later looking up by 'Producto'
     selected = df_view.loc[choices_idx].drop_duplicates("Producto").reset_index(drop=True)
 
     if not selected.empty:
@@ -644,7 +644,7 @@ else:
             base_df = selected[["Producto", "carb_g", "prot_g", "fat_g", "kcal_g"]].copy()
             old_locks = st.session_state.get(lock_key, {})
             locks = {p: bool(old_locks.get(p, False)) for p in base_df["Producto"].tolist()}
-            base_df.insert(1, "Locked", pd.Series([locks[p] for p in base_df["Producto"]]))
+            base_df.insert(1, "Locked", pd.Series([locks[p] for p in base_df["Producto"]))
             base_df.insert(2, "Grams (g)", 0.0)
             st.session_state[editor_key] = base_df
             st.session_state[editor_key + "_products"] = current_products
@@ -697,9 +697,9 @@ else:
 
         colA, colB, colC, colD = st.columns(4)
         colA.metric("kcal", f"{kcal_tot:.0f}", delta=f"{kcal_tot - kcal_target:+.0f}")
-        colB.metric("Carbs (g)", f"{carb_tot:.0f}", delta=f"{carb_tot - c_target:+.0f}")
-        colC.metric("Protein (g)", f"{prot_tot:.0f}", delta=f"{prot_tot - p_target:+.0f}")
-        colD.metric("Fat (g)", f"{fat_tot:.0f}", delta=f"{fat_tot - f_target:+.0f}")
+        colB.metric("Carbs (g)", f"{carb_tot:.0f}", delta=f"{carb_tot - ct:+.0f}")
+        colC.metric("Protein (g)", f"{prot_tot:.0f}", delta=f"{prot_tot - pt:+.0f}")
+        colD.metric("Fat (g)", f"{fat_tot:.0f}", delta=f"{fat_tot - ft:+.0f}")
 
         # Adjust grams
         st.markdown("**Adjust grams**")
@@ -709,7 +709,7 @@ else:
         with btn_col1:
             if st.button("Adjust ALL (match targets)"):
                 A_full = editor_df[["carb_g", "prot_g", "fat_g"]].to_numpy().T  # 3 x N
-                b = np.array([c_target, p_target, f_target], dtype=float)
+                b = np.array([ct, pt, ft], dtype=float)
                 products = editor_df["Producto"].tolist()
                 grams_now = editor_df["Grams (g)"].to_numpy().astype(float)
                 locks = st.session_state.get(lock_key, {p: False for p in products})
@@ -743,9 +743,9 @@ else:
             )
             if st.button("Adjust ONLY this ingredient"):
                 deficits = np.array([
-                    c_target - carb_tot,
-                    p_target - prot_tot,
-                    f_target - fat_tot,
+                    ct - carb_tot,
+                    pt - prot_tot,
+                    ft - fat_tot,
                 ], dtype=float)
                 v = (
                     editor_df.loc[editor_df["Producto"] == ing_choice, ["carb_g", "prot_g", "fat_g"]]
@@ -793,7 +793,7 @@ else:
                 "nombre": recipe_name or f"Recipe {len(st.session_state['recipes']) + 1}",
                 "tipo_dia": day_type,
                 "comida": meal,
-                "objetivo": {"kcal": float(kcal_target), "carb": float(c_target), "prot": float(p_target), "fat": float(f_target)},
+                "objetivo": {"kcal": float(kcal_target), "carb": float(ct), "prot": float(pt), "fat": float(ft)},
                 "resultado": {
                     "kcal": float(totals["kcal_g"]),
                     "carb": float(totals["carb_g"]),

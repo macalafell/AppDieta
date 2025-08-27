@@ -420,7 +420,7 @@ with col3:
         macros_daily_df["kcal"] / macros_daily_df["kcal"].sum() * 100
     ).round(1)
 
-    # Paleta solicitada
+    # Requested palette
     macro_colors = {
         "Carbohydrates": "#EE9B00",
         "Protein": "#CA6702",
@@ -611,15 +611,27 @@ st.markdown("### Recipe builder")
 if foods.empty:
     st.warning("First upload an Excel with foods (e.g., alimentos_800_especificos.xlsx) or place it in the app folder.")
 else:
-    df_view = foods.copy()
+    df_view = foods.copy().reset_index(drop=True)
+    df_view["Marca"] = df_view["Marca"].astype(str).fillna("")
 
-    # Multi-select (max 10)
-    choices = st.multiselect("Pick up to 10 foods for the recipe", df_view["Producto"].tolist())
-    if len(choices) > 10:
+    # Multi-select (max 10) — show brand in parentheses
+    df_view["__label__"] = np.where(
+        df_view["Marca"].str.strip() != "",
+        df_view["Producto"] + " (" + df_view["Marca"] + ")",
+        df_view["Producto"]
+    )
+    options = df_view.index.tolist()
+    choices_idx = st.multiselect(
+        "Pick up to 10 foods for the recipe",
+        options=options,
+        format_func=lambda i: df_view.loc[i, "__label__"],
+    )
+    if len(choices_idx) > 10:
         st.warning("You selected more than 10 items; only the first 10 will be used.")
-        choices = choices[:10]
+        choices_idx = choices_idx[:10]
 
-    selected = df_view[df_view["Producto"].isin(choices)].drop_duplicates("Producto").reset_index(drop=True)
+    # Keep one row per product name to avoid later ambiguity when looking up by 'Producto'
+    selected = df_view.loc[choices_idx].drop_duplicates("Producto").reset_index(drop=True)
 
     if not selected.empty:
         # Grams editor with session_state persistence

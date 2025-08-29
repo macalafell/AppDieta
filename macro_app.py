@@ -308,10 +308,13 @@ def login_button():
 
 def handle_oauth_callback():
     """When Google redirects back with ?code=..., exchange it for tokens and capture the ID token."""
-    params = st.experimental_get_query_params()
-    if "code" not in params:
+    params = st.query_params       # NEW API (dict-like)
+    code = params.get("code")
+    if not code:
         return None
-    code = params["code"][0]
+    if isinstance(code, list):
+        code = code[0]
+
     oauth = OAuth2Session(
         client_id=st.secrets.get("GOOGLE_CLIENT_ID", ""),
         client_secret=st.secrets.get("GOOGLE_CLIENT_SECRET", ""),
@@ -322,8 +325,9 @@ def handle_oauth_callback():
     claims = jwt.get_unverified_claims(token["id_token"])
     user = {"sub": claims.get("sub"), "email": claims.get("email")}
     st.session_state["user"] = user
-    # clean URL
-    st.experimental_set_query_params()
+
+    # Clear URL query params (replacement for experimental_set_query_params)
+    st.query_params.clear()
     return user
 
 
@@ -461,7 +465,6 @@ uploaded = st.sidebar.file_uploader("Upload your foods Excel (optional)", type=[
 # =============================
 # Account (Login / Logout)
 # =============================
-
 st.divider()
 st.subheader("Account")
 user = st.session_state.get("user") or handle_oauth_callback()
@@ -475,7 +478,7 @@ else:
     with col_u2:
         if st.button("Log out"):
             logout()
-            st.experimental_rerun()
+            _safe_rerun()
 
 # =============================
 # Load foods
@@ -886,7 +889,8 @@ else:
                     )
 
         # Current recipe detail
-        df_curr = editor_df[["Producto", "Grams (g)"]].copy()
+        df_curr = editor_df["Producto"].to_frame()
+        df_curr["Grams (g)"] = editor_df["Grams (g)"]
         df_curr["Carbohydrates (g)"] = (editor_df["carb_g"] * editor_df["Grams (g)"]).round(1)
         df_curr["Protein (g)"] = (editor_df["prot_g"] * editor_df["Grams (g)"]).round(1)
         df_curr["Fat (g)"] = (editor_df["fat_g"] * editor_df["Grams (g)"]).round(1)

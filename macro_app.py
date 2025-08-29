@@ -8,6 +8,12 @@ from io import BytesIO
 from typing import Dict, List, Optional
 import altair as alt
 
+# NEW: Auth / DB
+from authlib.integrations.requests_client import OAuth2Session
+from supabase import create_client
+from jose import jwt
+import secrets
+
 
 def _safe_rerun():
     """Streamlit compatibility: use st.rerun() if available; otherwise st.experimental_rerun()."""
@@ -263,11 +269,97 @@ def nnls_iterative(A: np.ndarray, b: np.ndarray, max_iter: int = 50) -> np.ndarr
 
 
 # =============================
+# Google OAuth (Authlib) + Supabase helpers
+# =============================
+
+GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_SCOPE = "openid email profile"
+
+# Fallback to your provided URL if not present in secrets
+APP_URL = st.secrets.get(
+    "APP_URL",
+    "https://appdieta-c7oldtsobgapphygatuaodu.streamlit.app/",
+)
+
+def supabase_client():
+    try:
+        return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_ANON_KEY"])
+    except Exception:
+        return None
+
+
+def login_button():
+    """Start Google OIDC flow (Auth Code + PKCE)."""
+    code_verifier = secrets.token_urlsafe(64)
+    st.session_state["pkce_verifier"] = code_verifier
+
+    oauth = OAuth2Session(
+        client_id=st.secrets.get("GOOGLE_CLIENT_ID", ""),
+        scope=GOOGLE_SCOPE,
+        redirect_uri=APP_URL,
+        code_challenge_method="S256",
+        code_verifier=code_verifier,
+    )
+    auth_url, state = oauth.create_authorization_url(GOOGLE_AUTH_URL)
+    st.session_state["oauth_state"] = state
+    st.link_button("Sign in with Google", auth_url, type="primary")
+
+
+def handle_oauth_callback():
+    """When Google redirects back with ?code=..., exchange it for tokens and capture the ID token."""
+    params = st.experimental_get_query_params()
+    if "code" not in params:
+        return None
+    code = params["code"][0]
+    oauth = OAuth2Session(
+        client_id=st.secrets.get("GOOGLE_CLIENT_ID", ""),
+        client_secret=st.secrets.get("GOOGLE_CLIENT_SECRET", ""),
+        redirect_uri=APP_URL,
+        code_verifier=st.session_state.get("pkce_verifier", ""),
+    )
+    token = oauth.fetch_token(GOOGLE_TOKEN_URL, code=code, include_client_id=True)
+    claims = jwt.get_unverified_claims(token["id_token"])
+    user = {"sub": claims.get("sub"), "email": claims.get("email")}
+    st.session_state["user"] = user
+    # clean URL
+    st.experimental_set_query_params()
+    return user
+
+
+def logout():
+    for k in ("user", "pkce_verifier", "oauth_state"):
+        st.session_state.pop(k, None)
+
+
+def save_recipe_to_cloud(user_id: str, recipe: dict):
+    sb = supabase_client()
+    if not sb:
+        raise RuntimeError("Supabase is not configured in secrets.")
+    row = {
+        "user_id": user_id,
+        "name": recipe["nombre"],
+        "day_type": recipe["tipo_dia"],
+        "meal": recipe["comida"],
+        "payload": recipe,
+    }
+    return sb.table("recipes").insert(row).execute()
+
+
+def load_cloud_recipes(user_id: str):
+    sb = supabase_client()
+    if not sb:
+        return []
+    res = sb.table("recipes").select("*").eq("user_id", user_id).order("created_at").execute()
+    return res.data or []
+
+
+# =============================
 # Sidebar: Profile & parameters
 # =============================
 
 st.sidebar.header("Profile & parameters")
-sex = st.sidebar.selectbox("Sex", ["Male", "Female"])
+sex = st.sidebar.selectbox("Sex", ["Male", "Female"])  # language-agnostic parser supports both
 weight = st.sidebar.number_input("Weight (kg)", min_value=30.0, max_value=300.0, value=65.0, step=0.5)
 height = st.sidebar.number_input("Height (cm)", min_value=120.0, max_value=230.0, value=178.0, step=0.5)
 age = st.sidebar.number_input("Age (years)", min_value=14, max_value=100, value=35, step=1)
@@ -367,6 +459,25 @@ st.sidebar.markdown("---")
 uploaded = st.sidebar.file_uploader("Upload your foods Excel (optional)", type=["xlsx"])
 
 # =============================
+# Account (Login / Logout)
+# =============================
+
+st.divider()
+st.subheader("Account")
+user = st.session_state.get("user") or handle_oauth_callback()
+if not user:
+    st.info("Sign in to save your recipes to the cloud.")
+    login_button()
+else:
+    col_u1, col_u2 = st.columns([3, 1])
+    with col_u1:
+        st.success(f"Signed in as {user['email']}")
+    with col_u2:
+        if st.button("Log out"):
+            logout()
+            st.experimental_rerun()
+
+# =============================
 # Load foods
 # =============================
 foods = load_foods(uploaded)
@@ -420,7 +531,7 @@ with col3:
         macros_daily_df["kcal"] / macros_daily_df["kcal"].sum() * 100
     ).round(1)
 
-    # Requested palette
+    # Palette
     macro_colors = {
         "Carbohydrates": "#EE9B00",
         "Protein": "#CA6702",
@@ -644,7 +755,6 @@ else:
             base_df = selected[["Producto", "carb_g", "prot_g", "fat_g", "kcal_g"]].copy()
             old_locks = st.session_state.get(lock_key, {})
             locks = {p: bool(old_locks.get(p, False)) for p in base_df["Producto"].tolist()}
-            # FIX: close brackets properly and align with index
             base_df.insert(
                 1,
                 "Locked",
@@ -810,8 +920,18 @@ else:
                     for i in range(len(editor_df))
                 ],
             }
+            # Save locally in session
             st.session_state["recipes"].append(r)
             st.success("Recipe saved in the session.")
+            # Save to cloud if logged in
+            if st.session_state.get("user"):
+                try:
+                    save_recipe_to_cloud(st.session_state["user"]["sub"], r)
+                    st.success("Recipe saved to your account (cloud).")
+                except Exception as e:
+                    st.warning(f"Cloud save failed: {e}")
+            else:
+                st.info("Sign in to save this recipe to your account.")
 
 # =============================
 # Saved recipes + export
@@ -879,12 +999,35 @@ else:
                     f"F: {r['resultado']['fat']:.0f} g"
                 )
 
-    # Export ALL recipes
-    st.markdown("\n#### Export ALL recipes")
+# Cloud recipes list (optional)
+if st.session_state.get("user"):
+    st.markdown("## My cloud recipes")
+    try:
+        cloud = load_cloud_recipes(st.session_state["user"]["sub"])
+    except Exception as e:
+        cloud = []
+        st.warning(f"Couldn't load cloud recipes: {e}")
+    if not cloud:
+        st.caption("No cloud recipes yet.")
+    else:
+        cloud_df = pd.DataFrame([
+            {
+                "Name": r["name"],
+                "Day type": r["day_type"],
+                "Meal": r["meal"],
+                "Created": r["created_at"],
+            }
+            for r in cloud
+        ])
+        st.dataframe(cloud_df, use_container_width=True)
+
+# Export ALL session recipes
+if st.session_state.get("recipes"):
+    st.markdown("\n#### Export ALL recipes (session)")
     buf_all = BytesIO()
     with pd.ExcelWriter(buf_all, engine="openpyxl") as writer:
         summary_rows = []
-        for r in recipes:
+        for r in st.session_state["recipes"]:
             summary_rows.append({
                 "Name": r["nombre"],
                 "Day type": r["tipo_dia"],
@@ -900,7 +1043,7 @@ else:
             })
         pd.DataFrame(summary_rows).to_excel(writer, index=False, sheet_name="Summary")
 
-        for r in recipes:
+        for r in st.session_state["recipes"]:
             ing_rows = []
             for ing in r["ingredientes"]:
                 row = foods[foods["Producto"] == ing["producto"]].head(1)
@@ -933,7 +1076,15 @@ else:
 st.markdown(
     """
     ---
-    **Note**: Data and recipes are stored only for this browser session.
-    If you want persistence across sessions (file or database), I can add it easily.
+    **Note**: Data and recipes are stored only for this browser session (and in the cloud if you're signed in).
+    To enable cloud saving, set the following in **Settings → Secrets**:
+
+    - APP_URL = the public URL of your app
+    - GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
+    - SUPABASE_URL / SUPABASE_ANON_KEY
+
+    In Supabase, create a table `recipes` with columns: id (uuid, default gen_random_uuid()),
+    user_id (text), name (text), day_type (text), meal (text), payload (jsonb), created_at (timestamptz default now()).
+    Keep RLS disabled for this table if you're using Google OIDC directly; we filter by user_id in queries.
     """
 )

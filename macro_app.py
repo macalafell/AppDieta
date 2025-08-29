@@ -307,8 +307,21 @@ def login_button():
 
 
 def handle_oauth_callback():
-    """When Google redirects back with ?code=..., exchange it for tokens and capture the ID token."""
-    params = st.query_params       # NEW API (dict-like)
+  def handle_oauth_callback():
+    """Intercambia el ?code de Google por tokens y guarda el usuario en sesión.
+       Si Google devuelve error en la URL, lo mostramos para diagnosticar."""
+    params = st.query_params
+    # Si Google devolvió un error (lo más útil para diagnosticar)
+    if "error" in params:
+        err = params.get("error")
+        if isinstance(err, list):
+            err = err[0]
+        desc = params.get("error_description") or params.get("error_subtype") or ""
+        if isinstance(desc, list):
+            desc = desc[0]
+        st.error(f"Google OAuth error: {err}\n{desc}")
+        return None
+
     code = params.get("code")
     if not code:
         return None
@@ -318,7 +331,7 @@ def handle_oauth_callback():
     oauth = OAuth2Session(
         client_id=st.secrets.get("GOOGLE_CLIENT_ID", ""),
         client_secret=st.secrets.get("GOOGLE_CLIENT_SECRET", ""),
-        redirect_uri=APP_URL,
+        redirect_uri=APP_URL,  # Debe coincidir EXACTAMENTE con lo registrado en Google
         code_verifier=st.session_state.get("pkce_verifier", ""),
     )
     token = oauth.fetch_token(GOOGLE_TOKEN_URL, code=code, include_client_id=True)
@@ -326,7 +339,7 @@ def handle_oauth_callback():
     user = {"sub": claims.get("sub"), "email": claims.get("email")}
     st.session_state["user"] = user
 
-    # Clear URL query params (replacement for experimental_set_query_params)
+    # Limpia los parámetros de la URL
     st.query_params.clear()
     return user
 

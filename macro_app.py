@@ -7,6 +7,8 @@ import unicodedata
 from io import BytesIO
 from typing import Dict, List, Optional
 import altair as alt
+import time
+
 
 # NEW: Auth / DB
 from authlib.integrations.requests_client import OAuth2Session
@@ -290,58 +292,85 @@ def supabase_client():
 
 
 def login_button():
-    """Start Google OIDC flow (Auth Code + PKCE)."""
+    """Start Google OIDC flow (Auth Code + PKCE) without relying on session_state for the verifier."""
+    # 1) Generate PKCE verifier
     code_verifier = secrets.token_urlsafe(64)
-    st.session_state["pkce_verifier"] = code_verifier
 
+    # 2) Pack it into a signed JWT 'state' so it survives the redirect
+    state_key = st.secrets.get("STATE_SECRET", st.secrets.get("GOOGLE_CLIENT_SECRET", "state-dev-key"))
+    state_payload = {
+        "v": code_verifier,                 # PKCE verifier
+        "nonce": secrets.token_urlsafe(16), # CSRF nonce
+        "iat": int(time.time()),
+        "exp": int(time.time()) + 600,      # 10 minutes
+    }
+    state_jwt = jwt.encode(state_payload, state_key, algorithm="HS256")
+
+    # 3) Build auth URL with our custom state
     oauth = OAuth2Session(
         client_id=st.secrets.get("GOOGLE_CLIENT_ID", ""),
-        scope=GOOGLE_SCOPE,
+        scope="openid email profile",
         redirect_uri=APP_URL,
         code_challenge_method="S256",
         code_verifier=code_verifier,
     )
-    auth_url, state = oauth.create_authorization_url(GOOGLE_AUTH_URL)
-    st.session_state["oauth_state"] = state
+    auth_url, _ = oauth.create_authorization_url(GOOGLE_AUTH_URL, state=state_jwt)
+
+    # 4) Link to Google
     st.link_button("Sign in with Google", auth_url, type="primary")
 
 
+
 def handle_oauth_callback():
-  def handle_oauth_callback():
-    """Intercambia el ?code de Google por tokens y guarda el usuario en sesión.
-       Si Google devuelve error en la URL, lo mostramos para diagnosticar."""
+    """Handle Google redirect: read ?code & ?state, recover PKCE verifier from signed state, exchange token, store user."""
     params = st.query_params
-    # Si Google devolvió un error (lo más útil para diagnosticar)
+
+    # If Google returned an explicit error, show it to diagnose
     if "error" in params:
         err = params.get("error")
-        if isinstance(err, list):
-            err = err[0]
+        if isinstance(err, list): err = err[0]
         desc = params.get("error_description") or params.get("error_subtype") or ""
-        if isinstance(desc, list):
-            desc = desc[0]
+        if isinstance(desc, list): desc = desc[0]
         st.error(f"Google OAuth error: {err}\n{desc}")
         return None
 
     code = params.get("code")
-    if not code:
+    state = params.get("state")
+    if not code or not state:
         return None
-    if isinstance(code, list):
-        code = code[0]
+    if isinstance(code, list):  code = code[0]
+    if isinstance(state, list): state = state[0]
 
-    oauth = OAuth2Session(
-        client_id=st.secrets.get("GOOGLE_CLIENT_ID", ""),
-        client_secret=st.secrets.get("GOOGLE_CLIENT_SECRET", ""),
-        redirect_uri=APP_URL,  # Debe coincidir EXACTAMENTE con lo registrado en Google
-        code_verifier=st.session_state.get("pkce_verifier", ""),
-    )
-    token = oauth.fetch_token(GOOGLE_TOKEN_URL, code=code, include_client_id=True)
-    claims = jwt.get_unverified_claims(token["id_token"])
-    user = {"sub": claims.get("sub"), "email": claims.get("email")}
-    st.session_state["user"] = user
+    # Decode and validate state (recover PKCE code_verifier)
+    try:
+        state_key = st.secrets.get("STATE_SECRET", st.secrets.get("GOOGLE_CLIENT_SECRET", "state-dev-key"))
+        decoded = jwt.decode(state, state_key, algorithms=["HS256"])  # will check exp
+        code_verifier = decoded.get("v", "")
+        if not code_verifier:
+            st.error("OAuth state did not include PKCE verifier.")
+            return None
+    except Exception as e:
+        st.error(f"Invalid OAuth state: {e}")
+        return None
 
-    # Limpia los parámetros de la URL
-    st.query_params.clear()
-    return user
+    # Exchange the code for tokens using the recovered verifier
+    try:
+        oauth = OAuth2Session(
+            client_id=st.secrets.get("GOOGLE_CLIENT_ID", ""),
+            client_secret=st.secrets.get("GOOGLE_CLIENT_SECRET", ""),
+            redirect_uri=APP_URL,
+            code_verifier=code_verifier,
+        )
+        token = oauth.fetch_token(GOOGLE_TOKEN_URL, code=code, include_client_id=True)
+        claims = jwt.get_unverified_claims(token["id_token"])
+        user = {"sub": claims.get("sub"), "email": claims.get("email")}
+        st.session_state["user"] = user
+        # Clean URL params
+        st.query_params.clear()
+        return user
+    except Exception as e:
+        st.error(f"Failed to complete Google login: {e}")
+        return None
 
 
 def logout():

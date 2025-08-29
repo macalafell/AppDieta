@@ -2,3 +2,7 @@ streamlit
 pandas
 numpy
 openpyxl
+altair
+authlib
+supabase
+python-jose

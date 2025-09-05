@@ -7,14 +7,6 @@ import unicodedata
 from io import BytesIO
 from typing import Dict, List, Optional
 import altair as alt
-import time
-
-
-# NEW: Auth / DB
-from authlib.integrations.requests_client import OAuth2Session
-from supabase import create_client
-from jose import jwt
-import secrets
 
 
 def _safe_rerun():
@@ -26,12 +18,12 @@ def _safe_rerun():
 
 
 # =============================
-# Page config
+# Page config & styles
 # =============================
 st.set_page_config(page_title="DIET APP · Meal Planner", layout="wide")
 
-# === Global styles (titles #BB4430) + tooltip CSS ===
-st.markdown("""
+st.markdown(
+    """
 <style>
   h1, h2, h3 { color: #BB4430 !important; }
   /* Avoid overlap on expander header */
@@ -54,7 +46,9 @@ st.markdown("""
   }
   .tooltip-content th:nth-child(2),.tooltip-content td:nth-child(2){text-align:center;width:90px;}
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 st.title("APP Recipe Builder")
 
@@ -177,16 +171,18 @@ def _normalize_food_df(df: pd.DataFrame) -> pd.DataFrame:
     elif fr100:
         fat_g = _to_float_series(df[fr100]) / 100.0
 
-    clean = pd.DataFrame({
-        "Producto": df[name_col].astype(str),
-        "Marca": df[brand_col].astype(str) if brand_col else "",
-        "Categoría": df[cat_col].astype(str) if cat_col else "",
-        "Subcategoría": df[subcat_col].astype(str) if subcat_col else "",
-        "carb_g": carb_g,
-        "prot_g": prot_g,
-        "fat_g": fat_g,
-        "kcal_g": kcal_g,
-    })
+    clean = pd.DataFrame(
+        {
+            "Producto": df[name_col].astype(str),
+            "Marca": df[brand_col].astype(str) if brand_col else "",
+            "Categoría": df[cat_col].astype(str) if cat_col else "",
+            "Subcategoría": df[subcat_col].astype(str) if subcat_col else "",
+            "carb_g": carb_g,
+            "prot_g": prot_g,
+            "fat_g": fat_g,
+            "kcal_g": kcal_g,
+        }
+    )
 
     if clean["kcal_g"].isna().any():
         has_macros = clean[["carb_g", "prot_g", "fat_g"]].notna().all(axis=1)
@@ -271,141 +267,11 @@ def nnls_iterative(A: np.ndarray, b: np.ndarray, max_iter: int = 50) -> np.ndarr
 
 
 # =============================
-# Google OAuth (Authlib) + Supabase helpers
-# =============================
-
-GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
-GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
-GOOGLE_SCOPE = "openid email profile"
-
-# Fallback to your provided URL if not present in secrets
-APP_URL = st.secrets.get(
-    "APP_URL",
-    "https://appdieta-c7oldtsobgapphygatuaodu.streamlit.app/",
-)
-
-def supabase_client():
-    try:
-        return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_ANON_KEY"])
-    except Exception:
-        return None
-
-
-def login_button():
-    """Start Google OIDC flow (Auth Code + PKCE) without relying on session_state for the verifier."""
-    # 1) Generate PKCE verifier
-    code_verifier = secrets.token_urlsafe(64)
-
-    # 2) Pack it into a signed JWT 'state' so it survives the redirect
-    state_key = st.secrets.get("STATE_SECRET", st.secrets.get("GOOGLE_CLIENT_SECRET", "state-dev-key"))
-    state_payload = {
-        "v": code_verifier,                 # PKCE verifier
-        "nonce": secrets.token_urlsafe(16), # CSRF nonce
-        "iat": int(time.time()),
-        "exp": int(time.time()) + 600,      # 10 minutes
-    }
-    state_jwt = jwt.encode(state_payload, state_key, algorithm="HS256")
-
-    # 3) Build auth URL with our custom state
-    oauth = OAuth2Session(
-        client_id=st.secrets.get("GOOGLE_CLIENT_ID", ""),
-        scope="openid email profile",
-        redirect_uri=APP_URL,
-        code_challenge_method="S256",
-        code_verifier=code_verifier,
-    )
-    auth_url, _ = oauth.create_authorization_url(GOOGLE_AUTH_URL, state=state_jwt)
-
-    # 4) Link to Google
-    st.link_button("Sign in with Google", auth_url, type="primary")
-
-
-
-def handle_oauth_callback():
-    """Handle Google redirect: read ?code & ?state, recover PKCE verifier from signed state, exchange token, store user."""
-    params = st.query_params
-
-    # If Google returned an explicit error, show it to diagnose
-    if "error" in params:
-        err = params.get("error")
-        if isinstance(err, list): err = err[0]
-        desc = params.get("error_description") or params.get("error_subtype") or ""
-        if isinstance(desc, list): desc = desc[0]
-        st.error(f"Google OAuth error: {err}\n{desc}")
-        return None
-
-    code = params.get("code")
-    state = params.get("state")
-    if not code or not state:
-        return None
-    if isinstance(code, list):  code = code[0]
-    if isinstance(state, list): state = state[0]
-
-    # Decode and validate state (recover PKCE code_verifier)
-    try:
-        state_key = st.secrets.get("STATE_SECRET", st.secrets.get("GOOGLE_CLIENT_SECRET", "state-dev-key"))
-        decoded = jwt.decode(state, state_key, algorithms=["HS256"])  # will check exp
-        code_verifier = decoded.get("v", "")
-        if not code_verifier:
-            st.error("OAuth state did not include PKCE verifier.")
-            return None
-    except Exception as e:
-        st.error(f"Invalid OAuth state: {e}")
-        return None
-
-    # Exchange the code for tokens using the recovered verifier
-    try:
-        oauth = OAuth2Session(
-            client_id=st.secrets.get("GOOGLE_CLIENT_ID", ""),
-            client_secret=st.secrets.get("GOOGLE_CLIENT_SECRET", ""),
-            redirect_uri=APP_URL,
-            code_verifier=code_verifier,
-        )
-        token = oauth.fetch_token(GOOGLE_TOKEN_URL, code=code, include_client_id=True)
-        claims = jwt.get_unverified_claims(token["id_token"])
-        user = {"sub": claims.get("sub"), "email": claims.get("email")}
-        st.session_state["user"] = user
-        # Clean URL params
-        st.query_params.clear()
-        return user
-    except Exception as e:
-        st.error(f"Failed to complete Google login: {e}")
-        return None
-
-
-def logout():
-    for k in ("user", "pkce_verifier", "oauth_state"):
-        st.session_state.pop(k, None)
-
-
-def save_recipe_to_cloud(user_id: str, recipe: dict):
-    sb = supabase_client()
-    if not sb:
-        raise RuntimeError("Supabase is not configured in secrets.")
-    row = {
-        "user_id": user_id,
-        "name": recipe["nombre"],
-        "day_type": recipe["tipo_dia"],
-        "meal": recipe["comida"],
-        "payload": recipe,
-    }
-    return sb.table("recipes").insert(row).execute()
-
-
-def load_cloud_recipes(user_id: str):
-    sb = supabase_client()
-    if not sb:
-        return []
-    res = sb.table("recipes").select("*").eq("user_id", user_id).order("created_at").execute()
-    return res.data or []
-
-
-# =============================
 # Sidebar: Profile & parameters
 # =============================
 
 st.sidebar.header("Profile & parameters")
-sex = st.sidebar.selectbox("Sex", ["Male", "Female"])  # language-agnostic parser supports both
+sex = st.sidebar.selectbox("Sex", ["Male", "Female"])  # parser supports both EN/ES tokens
 weight = st.sidebar.number_input("Weight (kg)", min_value=30.0, max_value=300.0, value=65.0, step=0.5)
 height = st.sidebar.number_input("Height (cm)", min_value=120.0, max_value=230.0, value=178.0, step=0.5)
 age = st.sidebar.number_input("Age (years)", min_value=14, max_value=100, value=35, step=1)
@@ -413,7 +279,8 @@ age = st.sidebar.number_input("Age (years)", min_value=14, max_value=100, value=
 st.sidebar.markdown("---")
 
 # Title with tooltip (replaces subheader)
-st.sidebar.markdown("""
+st.sidebar.markdown(
+    """
 <div class="tooltip-wrap">
   <h3 style="margin:0">Caloric goal by day type ⓘ</h3>
   <div class="tooltip-content">
@@ -437,7 +304,9 @@ st.sidebar.markdown("""
     </table>
   </div>
 </div>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 cal_mode = st.sidebar.radio("Mode", ["Multiplier", "Manual kcal"], horizontal=True)
 
@@ -472,6 +341,7 @@ adj_pct = st.sidebar.slider("Total calories adjustment (%)", min_value=-25, max_
 st.sidebar.markdown("---")
 st.sidebar.subheader("Carbohydrates (g/kg) calculated")
 
+
 def _tdee_by_method(day_label: str, adj_pct_value: float) -> float:
     bmr_local = mifflin_st_jeor_bmr(sex, weight, height, age)
     if cal_mode == "Multiplier":
@@ -490,37 +360,41 @@ def carbs_g_per_kg_for_day(day_label: str, p_gkg: float, f_gkg: float, adj_pct_v
     c_day_x = max(0.0, (tdee_x - (p_day_x * 4 + f_day_x * 9)) / 4.0)  # g/day
     return round(float(c_day_x / weight), 2)  # g/kg
 
+
 carbs_high_gkg = carbs_g_per_kg_for_day("High", p_high, g_high, adj_pct)
 carbs_medium_gkg = carbs_g_per_kg_for_day("Medium", p_medium, g_medium, adj_pct)
 carbs_low_gkg = carbs_g_per_kg_for_day("Low", p_low, g_low, adj_pct)
 
 st.sidebar.caption("HIGH day")
-st.sidebar.number_input("Carbohydrates (g/kg) - HIGH", value=carbs_high_gkg, step=0.01, format="%.2f", disabled=True, key="c_high_gkg_ro")
+st.sidebar.number_input(
+    "Carbohydrates (g/kg) - HIGH",
+    value=carbs_high_gkg,
+    step=0.01,
+    format="%.2f",
+    disabled=True,
+    key="c_high_gkg_ro",
+)
 st.sidebar.caption("MEDIUM day")
-st.sidebar.number_input("Carbohydrates (g/kg) - MEDIUM", value=carbs_medium_gkg, step=0.01, format="%.2f", disabled=True, key="c_medium_gkg_ro")
+st.sidebar.number_input(
+    "Carbohydrates (g/kg) - MEDIUM",
+    value=carbs_medium_gkg,
+    step=0.01,
+    format="%.2f",
+    disabled=True,
+    key="c_medium_gkg_ro",
+)
 st.sidebar.caption("LOW day")
-st.sidebar.number_input("Carbohydrates (g/kg) - LOW", value=carbs_low_gkg, step=0.01, format="%.2f", disabled=True, key="c_low_gkg_ro")
+st.sidebar.number_input(
+    "Carbohydrates (g/kg) - LOW",
+    value=carbs_low_gkg,
+    step=0.01,
+    format="%.2f",
+    disabled=True,
+    key="c_low_gkg_ro",
+)
 
 st.sidebar.markdown("---")
 uploaded = st.sidebar.file_uploader("Upload your foods Excel (optional)", type=["xlsx"])
-
-# =============================
-# Account (Login / Logout)
-# =============================
-st.divider()
-st.subheader("Account")
-user = st.session_state.get("user") or handle_oauth_callback()
-if not user:
-    st.info("Sign in to save your recipes to the cloud.")
-    login_button()
-else:
-    col_u1, col_u2 = st.columns([3, 1])
-    with col_u1:
-        st.success(f"Signed in as {user['email']}")
-    with col_u2:
-        if st.button("Log out"):
-            logout()
-            _safe_rerun()
 
 # =============================
 # Load foods
@@ -576,7 +450,7 @@ with col3:
         macros_daily_df["kcal"] / macros_daily_df["kcal"].sum() * 100
     ).round(1)
 
-    # Palette
+    # User-requested palette
     macro_colors = {
         "Carbohydrates": "#EE9B00",
         "Protein": "#CA6702",
@@ -646,6 +520,7 @@ with st.expander("Edit split (portion of the day)"):
 
 st.markdown("### Per-meal macro targets")
 
+
 def meal_targets(meal_name: str, perc: Dict[str, float]) -> Dict[str, float]:
     p_t = p_day * perc["prot"]
     f_t = f_day * perc["fat"]
@@ -659,12 +534,15 @@ def meal_targets(meal_name: str, perc: Dict[str, float]) -> Dict[str, float]:
         "Fat (g)": round(f_t, 1),
     }
 
-meals_summary = pd.DataFrame([
-    meal_targets("Breakfast", meal_defaults["Breakfast"]),
-    meal_targets("Lunch", meal_defaults["Lunch"]),
-    meal_targets("Snack", meal_defaults["Snack"]),
-    meal_targets("Dinner", meal_defaults["Dinner"]),
-])
+
+meals_summary = pd.DataFrame(
+    [
+        meal_targets("Breakfast", meal_defaults["Breakfast"]),
+        meal_targets("Lunch", meal_defaults["Lunch"]),
+        meal_targets("Snack", meal_defaults["Snack"]),
+        meal_targets("Dinner", meal_defaults["Dinner"]),
+    ]
+)
 
 # Add TOTAL row
 total_row = {
@@ -676,11 +554,13 @@ total_row = {
 }
 meals_summary_tot = pd.concat([meals_summary, pd.DataFrame([total_row])], ignore_index=True)
 
+
 # Render HTML table with bold Meal column and bold TOTAL row
 def render_meals_table_html(df: pd.DataFrame) -> str:
     cols = df.columns.tolist()
     html = []
-    html.append("""
+    html.append(
+        """
     <style>
       table.meals-summary {
         width: 100%;
@@ -704,7 +584,8 @@ def render_meals_table_html(df: pd.DataFrame) -> str:
         font-weight: 700; /* TOTAL row bold */
       }
     </style>
-    """)
+    """
+    )
     html.append('<table class="meals-summary">')
     # header
     html.append("<thead><tr>")
@@ -732,6 +613,7 @@ def render_meals_table_html(df: pd.DataFrame) -> str:
     html.append("</tbody></table>")
     return "".join(html)
 
+
 st.markdown(render_meals_table_html(meals_summary_tot), unsafe_allow_html=True)
 
 # Export Excel
@@ -757,7 +639,9 @@ pt = p_day * perc["prot"]
 ft = f_day * perc["fat"]
 ct = c_day * perc["carb"]
 kcal_target = ct * 4 + pt * 4 + ft * 9
-st.info(f"Target for {meal} → {kcal_target:.0f} kcal | Protein: {pt:.0f} g | Fat: {ft:.0f} g | Carbs: {ct:.0f} g")
+st.info(
+    f"Target for {meal} → {kcal_target:.0f} kcal | Protein: {pt:.0f} g | Fat: {ft:.0f} g | Carbs: {ct:.0f} g"
+)
 
 # =============================
 # Recipe builder
@@ -765,7 +649,9 @@ st.info(f"Target for {meal} → {kcal_target:.0f} kcal | Protein: {pt:.0f} g | F
 
 st.markdown("### Recipe builder")
 if foods.empty:
-    st.warning("First upload an Excel with foods (e.g., alimentos_800_especificos.xlsx) or place it in the app folder.")
+    st.warning(
+        "First upload an Excel with foods (e.g., alimentos_800_especificos.xlsx) or place it in the app folder."
+    )
 else:
     df_view = foods.copy().reset_index(drop=True)
     df_view["Marca"] = df_view["Marca"].astype(str).fillna("")
@@ -774,7 +660,7 @@ else:
     df_view["__label__"] = np.where(
         df_view["Marca"].str.strip() != "",
         df_view["Producto"] + " (" + df_view["Marca"] + ")",
-        df_view["Producto"]
+        df_view["Producto"],
     )
     options = df_view.index.tolist()
     choices_idx = st.multiselect(
@@ -803,7 +689,7 @@ else:
             base_df.insert(
                 1,
                 "Locked",
-                pd.Series([locks.get(p, False) for p in base_df["Producto"].tolist()], index=base_df.index)
+                pd.Series([locks.get(p, False) for p in base_df["Producto"].tolist()], index=base_df.index),
             )
             base_df.insert(2, "Grams (g)", 0.0)
             st.session_state[editor_key] = base_df
@@ -877,7 +763,9 @@ else:
                 unlocked_idx = [i for i, p in enumerate(products) if not locks.get(p, False)]
 
                 if len(unlocked_idx) == 0:
-                    st.info("All ingredients are locked (edited manually). Set some to 0 to unlock and adjust.")
+                    st.info(
+                        "All ingredients are locked (edited manually). Set some to 0 to unlock and adjust."
+                    )
                 else:
                     # Subtract locked contribution from the target
                     if len(locked_idx) > 0:
@@ -899,16 +787,23 @@ else:
         # 2) Adjust ONLY one selected ingredient
         with btn_col2:
             ing_choice = st.selectbox(
-                "Ingredient to adjust (only this one)", editor_df["Producto"].tolist(), key=f"single_sel_{meal}"
+                "Ingredient to adjust (only this one)",
+                editor_df["Producto"].tolist(),
+                key=f"single_sel_{meal}",
             )
             if st.button("Adjust ONLY this ingredient"):
-                deficits = np.array([
-                    ct - carb_tot,
-                    pt - prot_tot,
-                    ft - fat_tot,
-                ], dtype=float)
+                deficits = np.array(
+                    [
+                        ct - carb_tot,
+                        pt - prot_tot,
+                        ft - fat_tot,
+                    ],
+                    dtype=float,
+                )
                 v = (
-                    editor_df.loc[editor_df["Producto"] == ing_choice, ["carb_g", "prot_g", "fat_g"]]
+                    editor_df.loc[
+                        editor_df["Producto"] == ing_choice, ["carb_g", "prot_g", "fat_g"]
+                    ]
                     .to_numpy()
                     .ravel()
                 )
@@ -947,7 +842,7 @@ else:
         if "recipes" not in st.session_state:
             st.session_state["recipes"] = []
 
-        if st.button("Save recipe"):
+        if st.button("Save recipe to session"):
             grams = editor_df["Grams (g)"]
             totals = editor_df[["kcal_g", "carb_g", "prot_g", "fat_g"]].multiply(grams, axis=0).sum()
             r = {
@@ -966,21 +861,11 @@ else:
                     for i in range(len(editor_df))
                 ],
             }
-            # Save locally in session
             st.session_state["recipes"].append(r)
             st.success("Recipe saved in the session.")
-            # Save to cloud if logged in
-            if st.session_state.get("user"):
-                try:
-                    save_recipe_to_cloud(st.session_state["user"]["sub"], r)
-                    st.success("Recipe saved to your account (cloud).")
-                except Exception as e:
-                    st.warning(f"Cloud save failed: {e}")
-            else:
-                st.info("Sign in to save this recipe to your account.")
 
 # =============================
-# Saved recipes + export
+# Saved recipes + export (local only)
 # =============================
 
 st.markdown("## Saved recipes (this session)")
@@ -998,10 +883,14 @@ else:
                 col1, col2 = st.columns(2)
                 with col1:
                     st.write("**Target**")
-                    st.write(f"{r['objetivo']['kcal']:.0f} kcal | C:{r['objetivo']['carb']:.0f} g · P:{r['objetivo']['prot']:.0f} g · F:{r['objetivo']['fat']:.0f} g")
+                    st.write(
+                        f"{r['objetivo']['kcal']:.0f} kcal | C:{r['objetivo']['carb']:.0f} g · P:{r['objetivo']['prot']:.0f} g · F:{r['objetivo']['fat']:.0f} g"
+                    )
                 with col2:
                     st.write("**Result**")
-                    st.write(f"{r['resultado']['kcal']:.0f} kcal | C:{r['resultado']['carb']:.0f} g · P:{r['resultado']['prot']:.0f} g · F:{r['resultado']['fat']:.0f} g")
+                    st.write(
+                        f"{r['resultado']['kcal']:.0f} kcal | C:{r['resultado']['carb']:.0f} g · P:{r['resultado']['prot']:.0f} g · F:{r['resultado']['fat']:.0f} g"
+                    )
 
                 # Per-ingredient detail
                 ing_rows = []
@@ -1015,14 +904,16 @@ else:
                         fat = float(row["fat_g"].iloc[0]) * g
                     else:
                         kcal = carb = prot = fat = np.nan
-                    ing_rows.append({
-                        "Product": ing["producto"],
-                        "Grams (g)": round(g, 1),
-                        "Carbohydrates (g)": None if pd.isna(carb) else round(carb, 1),
-                        "Protein (g)": None if pd.isna(prot) else round(prot, 1),
-                        "Fat (g)": None if pd.isna(fat) else round(fat, 1),
-                        "kcal": None if pd.isna(kcal) else round(kcal, 0),
-                    })
+                    ing_rows.append(
+                        {
+                            "Product": ing["producto"],
+                            "Grams (g)": round(g, 1),
+                            "Carbohydrates (g)": None if pd.isna(carb) else round(carb, 1),
+                            "Protein (g)": None if pd.isna(prot) else round(prot, 1),
+                            "Fat (g)": None if pd.isna(fat) else round(fat, 1),
+                            "kcal": None if pd.isna(kcal) else round(kcal, 0),
+                        }
+                    )
                 df_ing = pd.DataFrame(ing_rows)
                 st.dataframe(df_ing, hide_index=True, use_container_width=True)
 
@@ -1045,28 +936,6 @@ else:
                     f"F: {r['resultado']['fat']:.0f} g"
                 )
 
-# Cloud recipes list (optional)
-if st.session_state.get("user"):
-    st.markdown("## My cloud recipes")
-    try:
-        cloud = load_cloud_recipes(st.session_state["user"]["sub"])
-    except Exception as e:
-        cloud = []
-        st.warning(f"Couldn't load cloud recipes: {e}")
-    if not cloud:
-        st.caption("No cloud recipes yet.")
-    else:
-        cloud_df = pd.DataFrame([
-            {
-                "Name": r["name"],
-                "Day type": r["day_type"],
-                "Meal": r["meal"],
-                "Created": r["created_at"],
-            }
-            for r in cloud
-        ])
-        st.dataframe(cloud_df, use_container_width=True)
-
 # Export ALL session recipes
 if st.session_state.get("recipes"):
     st.markdown("\n#### Export ALL recipes (session)")
@@ -1074,19 +943,21 @@ if st.session_state.get("recipes"):
     with pd.ExcelWriter(buf_all, engine="openpyxl") as writer:
         summary_rows = []
         for r in st.session_state["recipes"]:
-            summary_rows.append({
-                "Name": r["nombre"],
-                "Day type": r["tipo_dia"],
-                "Meal": r["comida"],
-                "kcal_target": r["objetivo"]["kcal"],
-                "carb_target": r["objetivo"]["carb"],
-                "prot_target": r["objetivo"]["prot"],
-                "fat_target": r["objetivo"]["fat"],
-                "kcal_result": r["resultado"]["kcal"],
-                "carb_result": r["resultado"]["carb"],
-                "prot_result": r["resultado"]["prot"],
-                "fat_result": r["resultado"]["fat"],
-            })
+            summary_rows.append(
+                {
+                    "Name": r["nombre"],
+                    "Day type": r["tipo_dia"],
+                    "Meal": r["comida"],
+                    "kcal_target": r["objetivo"]["kcal"],
+                    "carb_target": r["objetivo"]["carb"],
+                    "prot_target": r["objetivo"]["prot"],
+                    "fat_target": r["objetivo"]["fat"],
+                    "kcal_result": r["resultado"]["kcal"],
+                    "carb_result": r["resultado"]["carb"],
+                    "prot_result": r["resultado"]["prot"],
+                    "fat_result": r["resultado"]["fat"],
+                }
+            )
         pd.DataFrame(summary_rows).to_excel(writer, index=False, sheet_name="Summary")
 
         for r in st.session_state["recipes"]:
@@ -1101,14 +972,16 @@ if st.session_state.get("recipes"):
                     fat = float(row["fat_g"].iloc[0]) * g
                 else:
                     kcal = carb = prot = fat = np.nan
-                ing_rows.append({
-                    "Product": ing["producto"],
-                    "Grams (g)": round(g, 1),
-                    "Carbohydrates (g)": None if pd.isna(carb) else round(carb, 1),
-                    "Protein (g)": None if pd.isna(prot) else round(prot, 1),
-                    "Fat (g)": None if pd.isna(fat) else round(fat, 1),
-                    "kcal": None if pd.isna(kcal) else round(kcal, 0),
-                })
+                ing_rows.append(
+                    {
+                        "Product": ing["producto"],
+                        "Grams (g)": round(g, 1),
+                        "Carbohydrates (g)": None if pd.isna(carb) else round(carb, 1),
+                        "Protein (g)": None if pd.isna(prot) else round(prot, 1),
+                        "Fat (g)": None if pd.isna(fat) else round(fat, 1),
+                        "kcal": None if pd.isna(kcal) else round(kcal, 0),
+                    }
+                )
             pd.DataFrame(ing_rows).to_excel(writer, index=False, sheet_name=r["nombre"][:31])
 
     buf_all.seek(0)
@@ -1122,15 +995,7 @@ if st.session_state.get("recipes"):
 st.markdown(
     """
     ---
-    **Note**: Data and recipes are stored only for this browser session (and in the cloud if you're signed in).
-    To enable cloud saving, set the following in **Settings → Secrets**:
-
-    - APP_URL = the public URL of your app
-    - GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
-    - SUPABASE_URL / SUPABASE_ANON_KEY
-
-    In Supabase, create a table `recipes` with columns: id (uuid, default gen_random_uuid()),
-    user_id (text), name (text), day_type (text), meal (text), payload (jsonb), created_at (timestamptz default now()).
-    Keep RLS disabled for this table if you're using Google OIDC directly; we filter by user_id in queries.
+    **Note**: Data and recipes are stored only for this browser session. If you refresh, you'll lose them.
+    Use the Excel download buttons above to save your work locally.
     """
 )

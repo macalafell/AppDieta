@@ -206,6 +206,75 @@ def nnls_iterative(A: np.ndarray, b: np.ndarray, max_iter=50) -> np.ndarray:
 
 st.set_page_config(page_title="DIET APP · Meal Planner", layout="wide")
 
+import streamlit as st
+
+st.set_page_config(page_title="DIET APP · Meal Planner", layout="wide")
+
+# Inject Vaadin theme CSS variables and styles
+st.markdown("""
+<style>
+html {
+  --lumo-font-family: "Segoe UI", Candara, "Bitstream Vera Sans", "DejaVu Sans",
+    "Bitstream Vera Sans", "Trebuchet MS", Verdana, "Verdana Ref", sans-serif;
+  --lumo-border-radius: calc(var(--lumo-size-m) / 2);
+  --lumo-size-xl: 3rem;
+  --lumo-size-l: 2.5rem;
+  --lumo-size-m: 2rem;
+  --lumo-size-s: 1.75rem;
+  --lumo-size-xs: 1.5rem;
+  --lumo-font-size: 1rem;
+  --lumo-font-size-xxxl: 1.75rem;
+  --lumo-font-size-xxl: 1.375rem;
+  --lumo-font-size-xl: 1.125rem;
+  --lumo-font-size-l: 1rem;
+  --lumo-font-size-m: 0.875rem;
+  --lumo-font-size-s: 0.8125rem;
+  --lumo-font-size-xs: 0.75rem;
+  --lumo-font-size-xxs: 0.6875rem;
+  --lumo-primary-text-color: rgb(114, 22, 243);
+  --lumo-primary-color-50pct: rgba(114, 22, 243, 0.5);
+  --lumo-primary-color-10pct: rgba(114, 22, 243, 0.1);
+  --lumo-error-text-color: rgb(255, 56, 103);
+  --lumo-error-color-50pct: rgba(255, 56, 103, 0.5);
+  --lumo-error-color-10pct: rgba(255, 56, 103, 0.1);
+  --lumo-success-text-color: rgb(20, 184, 143);
+  --lumo-success-color-50pct: rgba(20, 184, 143, 0.5);
+  --lumo-success-color-10pct: rgba(20, 184, 143, 0.1);
+  --lumo-primary-color: hsl(265, 90%, 52%);
+  --lumo-error-color: hsl(346, 100%, 61%);
+  --lumo-success-color: hsl(165, 80%, 40%);
+  --lumo-header-text-color: hsl(285, 35%, 15%);
+  --lumo-body-text-color: hsla(285, 40%, 16%, 0.94);
+  --lumo-secondary-text-color: hsla(285, 42%, 18%, 0.72);
+  --lumo-tertiary-text-color: hsla(285, 45%, 20%, 0.5);
+  --lumo-disabled-text-color: hsla(285, 50%, 22%, 0.26);
+  --lumo-shade-5pct: rgba(40, 25, 52, 0.05);
+  --lumo-shade-10pct: rgba(40, 25, 52, 0.1);
+  --lumo-shade-20pct: rgba(40, 25, 52, 0.2);
+  --lumo-shade-30pct: rgba(40, 25, 52, 0.3);
+  --lumo-shade-40pct: rgba(40, 25, 52, 0.4);
+  --lumo-shade-50pct: rgba(40, 25, 52, 0.5);
+  --lumo-shade-60pct: rgba(40, 25, 52, 0.6);
+  --lumo-shade-70pct: rgba(40, 25, 52, 0.7);
+  --lumo-shade-80pct: rgba(40, 25, 52, 0.8);
+  --lumo-shade-90pct: rgba(40, 25, 52, 0.9);
+  --lumo-shade: hsl(274, 35%, 15%);
+}
+
+.vaadin-button:not([theme~="tertiary"]) {
+  background-image: linear-gradient(var(--lumo-tint-5pct), var(--lumo-shade-5pct));
+  box-shadow: inset 0 0 0 1px var(--lumo-contrast-20pct);
+  color: var(--lumo-body-text-color);
+}
+
+.vaadin-button[theme~="primary"] {
+  text-shadow: 0 -1px 0 var(--lumo-shade-20pct);
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ... followed by the rest of your existing code
+
 st.markdown("""
 <style>
 h1, h2, h3 { color: #BB4430 !important; }

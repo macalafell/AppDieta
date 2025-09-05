@@ -8,17 +8,171 @@ from io import BytesIO
 from typing import Dict, List, Optional
 import altair as alt
 
+# ==== Dark mode toggle and CSS injection ====
+
+if "dark_mode" not in st.session_state:
+    st.session_state.dark_mode = False
+
+def toggle_dark_mode():
+    st.session_state.dark_mode = not st.session_state.dark_mode
+
+st.sidebar.checkbox(
+    "🌙 Dark mode",
+    key="dark_mode",
+    value=st.session_state.dark_mode,
+    on_change=toggle_dark_mode,
+)
+
+def inject_styles(dark_mode: bool):
+    accent_color = "#BB4430"
+    if dark_mode:
+        st.markdown(f"""
+            <style>
+              /* General */
+              body {{
+                color: #EEE !important;
+                background-color: #121212 !important;
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                transition: background-color 0.3s ease, color 0.3s ease;
+              }}
+              h1, h2, h3 {{
+                color: {accent_color} !important;
+                font-weight: 600;
+                margin-bottom: 0.5rem;
+              }}
+              /* Container */
+              .block-container {{
+                max-width: 1100px;
+                padding: 2rem 3rem !important;
+                margin-left: auto;
+                margin-right: auto;
+              }}
+              /* Buttons */
+              .stButton>button {{
+                background-color: {accent_color} !important;
+                color: white !important;
+                border-radius: 6px;
+                border: none;
+                padding: 0.5em 1.3em;
+                box-shadow: 0 3px 6px rgba(0,0,0,0.4);
+                font-weight: 600;
+                transition: background-color 0.3s ease;
+              }}
+              .stButton>button:hover {{
+                background-color: #d15e25 !important;
+                cursor: pointer;
+              }}
+              /* Inputs */
+              input, textarea, select {{
+                background-color: #222 !important;
+                color: #EEE !important;
+                border-radius: 6px;
+                border: 1px solid #444 !important;
+                padding: 0.4em 0.6em;
+                font-size: 0.9rem;
+                transition: background-color 0.3s ease, color 0.3s ease;
+              }}
+              /* Sidebar background */
+              .css-1d391kg {{
+                background-color: #1E1E1E !important;
+                color: #EEE !important;
+                transition: background-color 0.3s ease, color 0.3s ease;
+              }}
+              /* Tables */
+              table, .stDataFrame > div {{
+                background-color: #1E1E1E !important;
+                color: #EEE !important;
+                border-radius: 8px;
+                transition: background-color 0.3s ease, color 0.3s ease;
+              }}
+              /* Tooltip styling */
+              .tooltip-wrap .tooltip-content {{
+                background: rgba(0,0,0,0.9);
+                border: 1px solid rgba(255,255,255,.1);
+                box-shadow: 0 6px 24px rgba(0,0,0,.5);
+              }}
+            </style>
+            """, unsafe_allow_html=True)
+    else:
+        st.markdown(f"""
+            <style>
+              /* General */
+              body {{
+                color: #333 !important;
+                background-color: white !important;
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                transition: background-color 0.3s ease, color 0.3s ease;
+              }}
+              h1, h2, h3 {{
+                color: {accent_color} !important;
+                font-weight: 600;
+                margin-bottom: 0.5rem;
+              }}
+              /* Container */
+              .block-container {{
+                max-width: 1100px;
+                padding: 2rem 3rem !important;
+                margin-left: auto;
+                margin-right: auto;
+              }}
+              /* Buttons */
+              .stButton>button {{
+                background-color: {accent_color} !important;
+                color: white !important;
+                border-radius: 6px;
+                border: none;
+                padding: 0.5em 1.3em;
+                box-shadow: 0 3px 6px rgba(0,0,0,0.15);
+                font-weight: 600;
+                transition: background-color 0.3s ease;
+              }}
+              .stButton>button:hover {{
+                background-color: #d15e25 !important;
+                cursor: pointer;
+              }}
+              /* Inputs */
+              input, textarea, select {{
+                background-color: white !important;
+                color: #222 !important;
+                border-radius: 6px;
+                border: 1px solid #ccc !important;
+                padding: 0.4em 0.6em;
+                font-size: 0.9rem;
+                transition: background-color 0.3s ease, color 0.3s ease;
+              }}
+              /* Sidebar background */
+              .css-1d391kg {{
+                background-color: #fff !important;
+                color: #333 !important;
+                transition: background-color 0.3s ease, color 0.3s ease;
+              }}
+              /* Tables */
+              table, .stDataFrame > div {{
+                background-color: white !important;
+                color: #333 !important;
+                border-radius: 8px;
+                transition: background-color 0.3s ease, color 0.3s ease;
+              }}
+              /* Tooltip styling */
+              .tooltip-wrap .tooltip-content {{
+                background: rgba(0,0,0,0.9);
+                border: 1px solid rgba(255,255,255,.1);
+                box-shadow: 0 6px 24px rgba(0,0,0,.15);
+              }}
+            </style>
+            """, unsafe_allow_html=True)
+
+inject_styles(st.session_state.dark_mode)
+
 # ==== Utilities ====
 
 def _safe_rerun():
-    """Streamlit compatibility rerun helper."""
     if hasattr(st, "rerun"):
         st.rerun()
     elif hasattr(st, "experimental_rerun"):
         st.experimental_rerun()
 
 def _norm_txt(s: str) -> str:
-    """Normalize text: lowercase, strip, remove accents, collapse spaces."""
     s = s.strip().lower()
     s = unicodedata.normalize("NFKD", s)
     s = "".join(c for c in s if not unicodedata.combining(c))
@@ -26,7 +180,6 @@ def _norm_txt(s: str) -> str:
     return s
 
 def _to_float_series(x: pd.Series) -> pd.Series:
-    """Robustly convert a Series to float, handling commas/spaces."""
     if x.dtype.kind in {"i", "u", "f"}:
         return x.astype(float)
     return pd.to_numeric(
@@ -35,18 +188,16 @@ def _to_float_series(x: pd.Series) -> pd.Series:
     )
 
 def kcal_from_macros(carb_g: float, prot_g: float, fat_g: float) -> float:
-    """Calculate kcal from macros."""
     return carb_g * 4 + prot_g * 4 + fat_g * 9
 
 def mifflin_st_jeor_bmr(sex: str, weight_kg: float, height_cm: float, age: int) -> float:
-    """Calculate BMR using Mifflin-St Jeor formula."""
     sex_norm = _norm_txt(sex)
     male_tokens = {"hombre", "masculino", "varon", "varón", "male", "man"}
     if sex_norm in male_tokens:
         return 10 * weight_kg + 6.25 * height_cm - 5 * age + 5
     return 10 * weight_kg + 6.25 * height_cm - 5 * age - 161
 
-# ==== Food Data Normalization ====
+# ==== Food data keys ====
 
 EXPECTED_NAME_KEYS = ["producto", "alimento", "nombre"]
 EXPECTED_BRAND_KEYS = ["marca"]
@@ -68,14 +219,12 @@ FAT_PER_G_KEYS = ["grasas (g/g)", "lipidos (g/g)"]
 FAT_PER_100G_KEYS = ["grasas (g/100g)", "lipidos (g/100g)"]
 
 def _find_first(cols_map: Dict[str, str], candidates: List[str]) -> Optional[str]:
-    """Find first column in cols_map matching any of candidates."""
     for key in candidates:
         if key in cols_map:
             return cols_map[key]
     return None
 
 def _normalize_food_df(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize raw food dataframe columns, unify macro units and names."""
     cols_map = {_norm_txt(c): c for c in df.columns}
     name_col = _find_first(cols_map, EXPECTED_NAME_KEYS)
     if not name_col:
@@ -127,7 +276,6 @@ def _normalize_food_df(df: pd.DataFrame) -> pd.DataFrame:
         "kcal_g": kcal_g,
     })
 
-    # Compute missing kcal_g from macros if possible
     missing_kcal_mask = clean["kcal_g"].isna()
     macros_available = clean[["carb_g", "prot_g", "fat_g"]].notna().all(axis=1)
     compute_mask = missing_kcal_mask & macros_available
@@ -155,7 +303,6 @@ def _parse_foods_from_path(path: str) -> pd.DataFrame:
     return pd.concat(dfs, ignore_index=True)
 
 def load_foods(uploaded) -> pd.DataFrame:
-    """Load foods from uploaded file or fallback file."""
     try:
         if uploaded is not None:
             data = uploaded.read()
@@ -168,13 +315,9 @@ def load_foods(uploaded) -> pd.DataFrame:
         st.error(f"Could not read Excel file: {e}")
         return pd.DataFrame()
 
-# ==== NNLS Solver without SciPy ====
+# ==== NNLS Solver ====
 
 def nnls_iterative(A: np.ndarray, b: np.ndarray, max_iter=50) -> np.ndarray:
-    """
-    Solve min ||Ax - b|| with x >= 0 using simple iterative pruning approach.
-    A shape: (m x n), b shape: (m,)
-    """
     A = np.asarray(A, dtype=float)
     b = np.asarray(b, dtype=float)
     if A.ndim != 2 or b.ndim != 1 or A.shape[0] != b.shape[0]:
@@ -201,34 +344,13 @@ def nnls_iterative(A: np.ndarray, b: np.ndarray, max_iter=50) -> np.ndarray:
     x = np.maximum(0.0, x) / col_scale
     return x
 
-
-# ==== Streamlit App UI ====
+# ==== Main App ====
 
 st.set_page_config(page_title="DIET APP · Meal Planner", layout="wide")
 
-st.markdown("""
-<style>
-h1, h2, h3 { color: #BB4430 !important; }
-div.streamlit-expanderHeader { white-space: normal !important; overflow: hidden; }
-div.streamlit-expanderHeader p { margin: 0 !important; }
-.tooltip-wrap{position:relative;display:inline-block;cursor:help;}
-.tooltip-wrap .tooltip-content{
-  visibility:hidden;opacity:0;transition:opacity .2s ease;position:absolute;left:0;top:120%;z-index:10000;
-  background:rgba(0,0,0,0.9);color:#fff;border:1px solid rgba(255,255,255,.1);
-  border-radius:8px;padding:10px 12px;width:360px;max-width:80vw;box-shadow:0 6px 24px rgba(0,0,0,.3);
-}
-.tooltip-wrap:hover .tooltip-content{visibility:visible;opacity:1;}
-.tooltip-content table{width:100%;border-collapse:collapse;font-size:0.85rem;}
-.tooltip-content th,.tooltip-content td{
-  padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.12);text-align:left;
-}
-.tooltip-content th:nth-child(2),.tooltip-content td:nth-child(2){text-align:center;width:90px;}
-</style>
-""", unsafe_allow_html=True)
-
 st.title("APP Recipe Builder")
 
-# Sidebar: Profile and parameters
+# === Sidebar ===
 
 st.sidebar.header("Profile & parameters")
 sex = st.sidebar.selectbox("Sex", ["Male", "Female"])
@@ -259,7 +381,6 @@ st.sidebar.markdown("""
 
 cal_mode = st.sidebar.radio("Caloric goal mode", ["Multiplier", "Manual kcal"], horizontal=True)
 
-# Multipliers or manual extras input
 if cal_mode == "Multiplier":
     mult_high = st.sidebar.number_input("Multiplier - High activity", value=1.60, step=0.01, format="%.2f")
     mult_medium = st.sidebar.number_input("Multiplier - Medium activity", value=1.55, step=0.01, format="%.2f")
@@ -275,7 +396,6 @@ else:
 st.sidebar.markdown("---")
 st.sidebar.subheader("Daily macros by day type (g / kg bodyweight)")
 
-# Protein and fat inputs per day type
 def input_macro(label: str, default: float) -> float:
     return st.sidebar.number_input(label, value=default, step=0.1, format="%.2f")
 
@@ -294,7 +414,9 @@ g_low = input_macro("Fat (g/kg) - LOW", 1.5)
 st.sidebar.markdown("---")
 adj_pct = st.sidebar.slider("Total calorie adjustment (%)", min_value=-25, max_value=25, value=-10, step=1)
 
-# Calculate carbohydrates automatically based on TDEE and protein/fat kcal
+mults_dict = {"High": mult_high, "Medium": mult_medium, "Low": mult_low}
+extras_dict = {"High": extra_high, "Medium": extra_medium, "Low": extra_low}
+
 def calculate_tdee_and_macros(
     sex: str, weight: float, height: float, age: int, day_type: str,
     cal_mode: str, mults: Dict[str,float], extras: Dict[str,float], adj_pct: float,
@@ -315,9 +437,6 @@ def calculate_tdee_and_macros(
         "protein_g": p_day, "fat_g": f_day, "carb_g": c_day
     }
 
-mults_dict = {"High": mult_high, "Medium": mult_medium, "Low": mult_low}
-extras_dict = {"High": extra_high, "Medium": extra_medium, "Low": extra_low}
-
 carbs_high_gkg = calculate_tdee_and_macros(sex, weight, height, age,"High", cal_mode, mults_dict, extras_dict, adj_pct, p_high, g_high)["carb_g"] / weight
 carbs_medium_gkg = calculate_tdee_and_macros(sex, weight, height, age,"Medium", cal_mode, mults_dict, extras_dict, adj_pct, p_medium, g_medium)["carb_g"] / weight
 carbs_low_gkg = calculate_tdee_and_macros(sex, weight, height, age,"Low", cal_mode, mults_dict, extras_dict, adj_pct, p_low, g_low)["carb_g"] / weight
@@ -331,11 +450,7 @@ st.sidebar.markdown("---")
 
 uploaded = st.sidebar.file_uploader("Upload your foods Excel (optional)", type=["xlsx"])
 
-# ==== Load foods ====
-
 foods = load_foods(uploaded)
-
-# ==== Main app calculations ====
 
 bmr = mifflin_st_jeor_bmr(sex, weight, height, age)
 
@@ -352,8 +467,6 @@ tdee = macros["tdee"]
 p_day = macros["protein_g"]
 f_day = macros["fat_g"]
 c_day = macros["carb_g"]
-
-# Display metrics and chart
 
 col1, col2, col3 = st.columns([1,1,1.2])
 
@@ -398,8 +511,6 @@ with col3:
     except Exception:
         st.bar_chart(macros_df.set_index("Macro")["kcal"])
 
-# ==== Meal split with editable portions ====
-
 st.markdown("### Meal split")
 
 meal_defaults = {
@@ -419,13 +530,10 @@ with st.expander("Edit split (portion of daily macros)"):
             meal_defaults[meal][macro] = new_val
 
     totals = {macro: sum(meal_defaults[m][macro] for m in meal_defaults) for macro in ["prot", "fat", "carb"]}
-
     warn_msgs = [f"{k} sum = {v:.2f}" for k,v in totals.items() if not 0.95 <= v <= 1.05]
 
     if warn_msgs:
         st.warning("; ".join(warn_msgs) + ". Ideally each macro sum should be near 1.00.")
-
-# ==== Per meal macro targets table and Excel export ====
 
 st.markdown("### Per-meal macro targets")
 
@@ -487,7 +595,6 @@ def render_meals_table_html(df: pd.DataFrame) -> str:
 
 st.markdown(render_meals_table_html(meals_summary_tot), unsafe_allow_html=True)
 
-# Excel export for per meal summary
 buf_meals = BytesIO()
 with pd.ExcelWriter(buf_meals, engine="openpyxl") as writer:
     meals_summary_tot.to_excel(writer, index=False, sheet_name="Per-meal macros")
@@ -499,8 +606,6 @@ st.download_button(
     file_name="per_meal_macro_summary.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
-
-# ==== Targets for selected meal ====
 
 st.markdown("### Meal")
 
@@ -515,8 +620,6 @@ kcal_target = ct*4 + pt*4 + ft*9
 st.info(
     f"Target for {meal} → {kcal_target:.0f} kcal | Protein: {pt:.0f} g | Fat: {ft:.0f} g | Carbs: {ct:.0f} g"
 )
-
-# ==== Recipe builder ====
 
 st.markdown("### Recipe builder")
 
@@ -590,7 +693,6 @@ else:
 
         st.session_state[editor_key] = editor_df
 
-        # Sync locks from table, unlocking grams=0
         locks = st.session_state.get(lock_key, {})
         for _, row in editor_df.iterrows():
             p = row["Producto"]
@@ -599,7 +701,6 @@ else:
             locks[p] = False if g == 0 else checked
         st.session_state[lock_key] = locks
 
-        # Compute totals for recipe macros and kcal
         grams = editor_df["Grams (g)"].to_numpy(dtype=float)
         totals = editor_df[["kcal_g", "carb_g", "prot_g", "fat_g"]].multiply(grams, axis=0).sum()
         kcal_tot = float(totals["kcal_g"])
@@ -617,10 +718,9 @@ else:
 
         btn_col1, btn_col2 = st.columns([1, 2])
 
-        # Adjust all unlocked ingredients to meet targets
         with btn_col1:
             if st.button("Adjust ALL (match targets)"):
-                A_full = editor_df[["carb_g", "prot_g", "fat_g"]].to_numpy().T  # shape 3 x n
+                A_full = editor_df[["carb_g", "prot_g", "fat_g"]].to_numpy().T
                 b_vec = np.array([ct, pt, ft], dtype=float)
                 products = editor_df["Producto"].tolist()
                 grams_now = editor_df["Grams (g)"].to_numpy(dtype=float)
@@ -646,7 +746,6 @@ else:
                     st.success("Adjusted grams for all unlocked ingredients.")
                     _safe_rerun()
 
-        # Adjust grams of a single selected ingredient
         with btn_col2:
             ing_choice = st.selectbox(
                 "Ingredient to adjust only", editor_df["Producto"].tolist(),
@@ -667,7 +766,6 @@ else:
                     msg = "increased" if g_delta >= 0 else "reduced"
                     st.success(f"Grams {msg} for '{ing_choice}' by {abs(g_delta):.0f} g (new total: {new_val:.0f} g).")
 
-        # Display current recipe macro breakdown
         df_curr = editor_df[["Producto", "Grams (g)"]].copy()
         df_curr["Carbohydrates (g)"] = (editor_df["carb_g"] * editor_df["Grams (g)"]).round(1)
         df_curr["Protein (g)"] = (editor_df["prot_g"] * editor_df["Grams (g)"]).round(1)
@@ -706,8 +804,6 @@ else:
             }
             st.session_state["recipes"].append(recipe_dict)
             st.success("Recipe saved in this session.")
-
-# ==== Saved Recipes and Export ====
 
 st.markdown("## Saved recipes (this session)")
 
@@ -822,8 +918,6 @@ else:
         file_name="session_recipes.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
-
-# ==== Footer note ====
 
 st.markdown("""
 ---

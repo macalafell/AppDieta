@@ -23,146 +23,92 @@ st.sidebar.checkbox(
     on_change=toggle_dark_mode,
 )
 
-def inject_styles(dark_mode: bool):
-    accent_color = "#BB4430"
-    if dark_mode:
-        st.markdown(f"""
-            <style>
-              /* General */
-              body {{
-                color: #EEE !important;
-                background-color: #121212 !important;
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                transition: background-color 0.3s ease, color 0.3s ease;
-              }}
-              h1, h2, h3 {{
-                color: {accent_color} !important;
-                font-weight: 600;
-                margin-bottom: 0.5rem;
-              }}
-              /* Container */
-              .block-container {{
-                max-width: 1100px;
-                padding: 2rem 3rem !important;
-                margin-left: auto;
-                margin-right: auto;
-              }}
-              /* Buttons */
-              .stButton>button {{
-                background-color: {accent_color} !important;
-                color: white !important;
-                border-radius: 6px;
-                border: none;
-                padding: 0.5em 1.3em;
-                box-shadow: 0 3px 6px rgba(0,0,0,0.4);
-                font-weight: 600;
-                transition: background-color 0.3s ease;
-              }}
-              .stButton>button:hover {{
-                background-color: #d15e25 !important;
-                cursor: pointer;
-              }}
-              /* Inputs */
-              input, textarea, select {{
-                background-color: #222 !important;
-                color: #EEE !important;
-                border-radius: 6px;
-                border: 1px solid #444 !important;
-                padding: 0.4em 0.6em;
-                font-size: 0.9rem;
-                transition: background-color 0.3s ease, color 0.3s ease;
-              }}
-              /* Sidebar background */
-              .css-1d391kg {{
-                background-color: #1E1E1E !important;
-                color: #EEE !important;
-                transition: background-color 0.3s ease, color 0.3s ease;
-              }}
-              /* Tables */
-              table, .stDataFrame > div {{
-                background-color: #1E1E1E !important;
-                color: #EEE !important;
-                border-radius: 8px;
-                transition: background-color 0.3s ease, color 0.3s ease;
-              }}
-              /* Tooltip styling */
-              .tooltip-wrap .tooltip-content {{
-                background: rgba(0,0,0,0.9);
-                border: 1px solid rgba(255,255,255,.1);
-                box-shadow: 0 6px 24px rgba(0,0,0,.5);
-              }}
-            </style>
-            """, unsafe_allow_html=True)
-    else:
-        st.markdown(f"""
-            <style>
-              /* General */
-              body {{
-                color: #333 !important;
-                background-color: white !important;
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                transition: background-color 0.3s ease, color 0.3s ease;
-              }}
-              h1, h2, h3 {{
-                color: {accent_color} !important;
-                font-weight: 600;
-                margin-bottom: 0.5rem;
-              }}
-              /* Container */
-              .block-container {{
-                max-width: 1100px;
-                padding: 2rem 3rem !important;
-                margin-left: auto;
-                margin-right: auto;
-              }}
-              /* Buttons */
-              .stButton>button {{
-                background-color: {accent_color} !important;
-                color: white !important;
-                border-radius: 6px;
-                border: none;
-                padding: 0.5em 1.3em;
-                box-shadow: 0 3px 6px rgba(0,0,0,0.15);
-                font-weight: 600;
-                transition: background-color 0.3s ease;
-              }}
-              .stButton>button:hover {{
-                background-color: #d15e25 !important;
-                cursor: pointer;
-              }}
-              /* Inputs */
-              input, textarea, select {{
-                background-color: white !important;
-                color: #222 !important;
-                border-radius: 6px;
-                border: 1px solid #ccc !important;
-                padding: 0.4em 0.6em;
-                font-size: 0.9rem;
-                transition: background-color 0.3s ease, color 0.3s ease;
-              }}
-              /* Sidebar background */
-              .css-1d391kg {{
-                background-color: #fff !important;
-                color: #333 !important;
-                transition: background-color 0.3s ease, color 0.3s ease;
-              }}
-              /* Tables */
-              table, .stDataFrame > div {{
-                background-color: white !important;
-                color: #333 !important;
-                border-radius: 8px;
-                transition: background-color 0.3s ease, color 0.3s ease;
-              }}
-              /* Tooltip styling */
-              .tooltip-wrap .tooltip-content {{
-                background: rgba(0,0,0,0.9);
-                border: 1px solid rgba(255,255,255,.1);
-                box-shadow: 0 6px 24px rgba(0,0,0,.15);
-              }}
-            </style>
-            """, unsafe_allow_html=True)
-
+def inject_styles(dark_mode):
+    accent = "#BB4430"
+    heading = "#F4F4F4"
+    text = "#DDD"
+    bg_dark = "#181818"
+    bg_panel = "#23232b"
+    border = "#333"
+    shadow = "0 2px 16px rgba(0,0,0,0.24)"
+    st.markdown(f"""
+    <style>
+      .block-container {{
+        background: {bg_dark};
+        padding: 40px 50px 40px 50px !important;
+        transition: background 0.3s;
+        min-height: 100vh;
+      }}
+      section[tabindex="0"] {{
+        background: {bg_panel};
+        border-radius: 12px;
+        box-shadow: {shadow};
+        margin-bottom: 30px;
+        padding: 20px 30px;
+      }}
+      h1, h2, h3 {{
+        color: {heading} !important;
+        font-family: 'Montserrat', 'Segoe UI', Sans-serif;
+        font-weight: 700;
+        margin-bottom: 16px;
+      }}
+      .stSidebar, .css-1d391kg {{
+        background: {bg_panel} !important;
+        color: {text} !important;
+        border-right: 2px solid {border};
+        min-width: 240px;
+      }}
+      label, .stNumberInput label, .stTextInput label, .stSelectbox label {{
+        color: {text} !important;
+        font-size: 1rem;
+        font-family: 'Segoe UI', Sans-serif;
+      }}
+      .stButton>button {{
+        background: {accent};
+        color: #fff;
+        border-radius: 8px;
+        padding: 10px 24px;
+        font-size: 1.08rem;
+        font-weight: 600;
+        box-shadow: {shadow};
+        transition: background 0.2s;
+      }}
+      .stButton>button:hover {{
+        background: #A63E24 !important;
+      }}
+      input, textarea, select {{
+        background: #2a2d34 !important;
+        color: {heading} !important;
+        border-radius: 7px;
+        border: 1.5px solid {border} !important;
+        font-size: 1rem;
+        padding: 0.45em 0.6em;
+      }}
+      table, th, td, .stDataFrame>div {{
+        background: #23232b !important;
+        color: {text} !important;
+        border-radius: 10px;
+        font-family: 'Segoe UI', Sans-serif;
+        font-size: 1rem;
+      }}
+      .stMetric, .stMetric label {{
+        color: {heading} !important;
+        font-size: 1.5rem !important;
+      }}
+      /* Section accent underline for headers */
+      h2::after {{
+        content: "";
+        display: block;
+        width: 50px;
+        height: 4px;
+        background: {accent};
+        margin-top:8px;
+        border-radius:2px;
+      }}
+    </style>
+    """, unsafe_allow_html=True)
 inject_styles(st.session_state.dark_mode)
+
 
 # ==== Utilities ====
 
